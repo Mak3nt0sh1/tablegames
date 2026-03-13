@@ -17,9 +17,10 @@ func NewRepository(db *sqlx.DB) *Repository {
 
 func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) error {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO rooms (uuid, name, host_id, invite_code, max_players, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		room.UUID, room.Name, room.HostID, room.InviteCode, room.MaxPlayers, room.ExpiresAt,
+		`INSERT INTO rooms (uuid, name, host_id, invite_code, password_hash, max_players, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		room.UUID, room.Name, room.HostID, room.InviteCode,
+		room.PasswordHash, room.MaxPlayers, room.ExpiresAt,
 	)
 	if err != nil {
 		return err
@@ -29,11 +30,16 @@ func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) error {
 	return nil
 }
 
-func (r *Repository) AddMember(ctx context.Context, roomID, userID uint64, role string) error {
+func (r *Repository) UpdateRoom(ctx context.Context, room *models.Room) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT IGNORE INTO room_members (room_id, user_id, role) VALUES (?, ?, ?)`,
-		roomID, userID, role,
+		`UPDATE rooms SET name = ?, max_players = ?, password_hash = ? WHERE id = ?`,
+		room.Name, room.MaxPlayers, room.PasswordHash, room.ID,
 	)
+	return err
+}
+
+func (r *Repository) DeleteRoom(ctx context.Context, roomID uint64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM rooms WHERE id = ?`, roomID)
 	return err
 }
 
@@ -49,16 +55,20 @@ func (r *Repository) FindByInviteCode(ctx context.Context, code string) (*models
 	return &room, err
 }
 
-func (r *Repository) CountMembers(ctx context.Context, roomID uint64) (int, error) {
-	var count int
-	err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM room_members WHERE room_id = ?`, roomID)
-	return count, err
+func (r *Repository) AddMember(ctx context.Context, roomID, userID uint64, role string) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT IGNORE INTO room_members (room_id, user_id, role) VALUES (?, ?, ?)`,
+		roomID, userID, role,
+	)
+	return err
 }
 
-func (r *Repository) GetMembers(ctx context.Context, roomID uint64) ([]models.RoomMember, error) {
-	var members []models.RoomMember
-	err := r.db.SelectContext(ctx, &members, `SELECT * FROM room_members WHERE room_id = ?`, roomID)
-	return members, err
+func (r *Repository) RemoveMember(ctx context.Context, roomID, userID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM room_members WHERE room_id = ? AND user_id = ?`,
+		roomID, userID,
+	)
+	return err
 }
 
 func (r *Repository) FindMember(ctx context.Context, roomID, userID uint64) (*models.RoomMember, error) {
@@ -67,6 +77,18 @@ func (r *Repository) FindMember(ctx context.Context, roomID, userID uint64) (*mo
 		`SELECT * FROM room_members WHERE room_id = ? AND user_id = ?`, roomID, userID,
 	)
 	return &m, err
+}
+
+func (r *Repository) GetMembers(ctx context.Context, roomID uint64) ([]models.RoomMember, error) {
+	var members []models.RoomMember
+	err := r.db.SelectContext(ctx, &members, `SELECT * FROM room_members WHERE room_id = ?`, roomID)
+	return members, err
+}
+
+func (r *Repository) CountMembers(ctx context.Context, roomID uint64) (int, error) {
+	var count int
+	err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM room_members WHERE room_id = ?`, roomID)
+	return count, err
 }
 
 func (r *Repository) CreateInvite(ctx context.Context, inv *models.RoomInvite) error {

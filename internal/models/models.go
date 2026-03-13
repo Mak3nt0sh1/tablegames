@@ -13,15 +13,20 @@ type User struct {
 }
 
 type Room struct {
-	ID         uint64    `db:"id"          json:"id"`
-	UUID       string    `db:"uuid"        json:"uuid"`
-	Name       string    `db:"name"        json:"name"`
-	HostID     uint64    `db:"host_id"     json:"host_id"`
-	InviteCode string    `db:"invite_code" json:"invite_code"`
-	MaxPlayers int       `db:"max_players" json:"max_players"`
-	Status     string    `db:"status"      json:"status"`
-	CreatedAt  time.Time `db:"created_at"  json:"created_at"`
-	ExpiresAt  time.Time `db:"expires_at"  json:"expires_at"`
+	ID           uint64    `db:"id"            json:"id"`
+	UUID         string    `db:"uuid"          json:"uuid"`
+	Name         string    `db:"name"          json:"name"`
+	HostID       uint64    `db:"host_id"       json:"host_id"`
+	InviteCode   string    `db:"invite_code"   json:"invite_code"`
+	PasswordHash *string   `db:"password_hash" json:"-"`
+	MaxPlayers   int       `db:"max_players"   json:"max_players"`
+	Status       string    `db:"status"        json:"status"`
+	CreatedAt    time.Time `db:"created_at"    json:"created_at"`
+	ExpiresAt    time.Time `db:"expires_at"    json:"expires_at"`
+}
+
+func (r *Room) HasPassword() bool {
+	return r.PasswordHash != nil && *r.PasswordHash != ""
 }
 
 type RoomMember struct {
