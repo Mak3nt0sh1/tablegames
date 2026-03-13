@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -19,6 +20,8 @@ var (
 	ErrRoomNotAvail  = errors.New("room is not available")
 	ErrInvalidInvite = errors.New("invalid or expired invite")
 	ErrForbidden     = errors.New("forbidden")
+	ErrWrongPassword = errors.New("wrong password")
+	ErrNotMember     = errors.New("not a member of this room")
 )
 
 type Service struct {
@@ -29,7 +32,7 @@ func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) CreateRoom(ctx context.Context, hostID uint64, name string, maxPlayers int) (*models.Room, error) {
+func (s *Service) CreateRoom(ctx context.Context, hostID uint64, name string, maxPlayers int, password string) (*models.Room, error) {
 	code, err := generateInviteCode()
 	if err != nil {
 		return nil, err
@@ -42,6 +45,14 @@ func (s *Service) CreateRoom(ctx context.Context, hostID uint64, name string, ma
 		MaxPlayers: maxPlayers,
 		Status:     "waiting",
 		ExpiresAt:  time.Now().Add(24 * time.Hour),
+	}
+	if password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, err
+		}
+		h := string(hash)
+		room.PasswordHash = &h
 	}
 	if err := s.repo.CreateRoom(ctx, room); err != nil {
 		return nil, err
@@ -58,10 +69,107 @@ func (s *Service) GetMembers(ctx context.Context, roomID uint64) ([]models.RoomM
 	return s.repo.GetMembers(ctx, roomID)
 }
 
-func (s *Service) JoinByCode(ctx context.Context, userID uint64, code string) (*models.Room, error) {
+func (s *Service) IsMember(ctx context.Context, roomID, userID uint64) (bool, error) {
+	_, err := s.repo.FindMember(ctx, roomID, userID)
+	return err == nil, nil
+}
+
+// UpdateRoom — хост меняет настройки комнаты
+func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64, name string, maxPlayers int, password *string) (*models.Room, error) {
+	room, err := s.repo.FindByUUID(ctx, roomUUID)
+	if err != nil {
+		return nil, ErrRoomNotFound
+	}
+	if room.HostID != hostID {
+		return nil, ErrForbidden
+	}
+	if room.Status != "waiting" {
+		return nil, ErrRoomNotAvail
+	}
+	if maxPlayers > 0 {
+		count, _ := s.repo.CountMembers(ctx, room.ID)
+		if maxPlayers < count {
+			return nil, errors.New("max_players cannot be less than current player count")
+		}
+		room.MaxPlayers = maxPlayers
+	}
+	if name != "" {
+		room.Name = name
+	}
+	// password: nil = не менять, "" = убрать пароль, "xxx" = установить новый
+	if password != nil {
+		if *password == "" {
+			room.PasswordHash = nil
+		} else {
+			hash, err := bcrypt.GenerateFromPassword([]byte(*password), bcrypt.DefaultCost)
+			if err != nil {
+				return nil, err
+			}
+			h := string(hash)
+			room.PasswordHash = &h
+		}
+	}
+	if err := s.repo.UpdateRoom(ctx, room); err != nil {
+		return nil, err
+	}
+	return room, nil
+}
+
+// LeaveRoom — игрок добровольно выходит из комнаты
+func (s *Service) LeaveRoom(ctx context.Context, roomUUID string, userID uint64) error {
+	room, err := s.repo.FindByUUID(ctx, roomUUID)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if room.HostID == userID {
+		return errors.New("host cannot leave, use delete room instead")
+	}
+	return s.repo.RemoveMember(ctx, room.ID, userID)
+}
+
+// KickPlayer — хост кикает игрока
+func (s *Service) KickPlayer(ctx context.Context, roomUUID string, hostID, targetUserID uint64) error {
+	room, err := s.repo.FindByUUID(ctx, roomUUID)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if room.HostID != hostID {
+		return ErrForbidden
+	}
+	if targetUserID == hostID {
+		return errors.New("cannot kick yourself")
+	}
+	_, err = s.repo.FindMember(ctx, room.ID, targetUserID)
+	if err != nil {
+		return ErrNotMember
+	}
+	return s.repo.RemoveMember(ctx, room.ID, targetUserID)
+}
+
+// DeleteRoom — хост удаляет комнату
+func (s *Service) DeleteRoom(ctx context.Context, roomUUID string, hostID uint64) error {
+	room, err := s.repo.FindByUUID(ctx, roomUUID)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if room.HostID != hostID {
+		return ErrForbidden
+	}
+	return s.repo.DeleteRoom(ctx, room.ID)
+}
+
+func (s *Service) JoinByCode(ctx context.Context, userID uint64, code string, password string) (*models.Room, error) {
 	room, err := s.repo.FindByInviteCode(ctx, code)
 	if err != nil {
 		return nil, ErrRoomNotFound
+	}
+	if room.HasPassword() {
+		if password == "" {
+			return nil, ErrWrongPassword
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(*room.PasswordHash), []byte(password)); err != nil {
+			return nil, ErrWrongPassword
+		}
 	}
 	return s.joinRoom(ctx, userID, room)
 }
@@ -74,12 +182,13 @@ func (s *Service) JoinByToken(ctx context.Context, userID uint64, token string) 
 	if invite.InvitedUserID != nil && *invite.InvitedUserID != userID {
 		return nil, ErrInvalidInvite
 	}
-	room, err := s.repo.FindByUUID(ctx, fmt.Sprintf("%d", invite.RoomID))
+	var room models.Room
+	err = s.repo.db.GetContext(ctx, &room, `SELECT * FROM rooms WHERE id = ?`, invite.RoomID)
 	if err != nil {
 		return nil, ErrRoomNotFound
 	}
 	_ = s.repo.UpdateInviteStatus(ctx, invite.ID, "accepted")
-	return s.joinRoom(ctx, userID, room)
+	return s.joinRoom(ctx, userID, &room)
 }
 
 func (s *Service) CreateInviteLink(ctx context.Context, roomUUID string, hostID uint64) (string, error) {
