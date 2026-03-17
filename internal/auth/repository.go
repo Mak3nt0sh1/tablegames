@@ -41,3 +41,28 @@ func (r *Repository) ExistsByEmailOrUsername(ctx context.Context, email, usernam
 	)
 	return count > 0, err
 }
+
+
+// GetUsernames — возвращает map userID -> username
+func (r *Repository) GetUsernames(ctx context.Context, userIDs []uint64) (map[uint64]string, error) {
+	if len(userIDs) == 0 {
+		return map[uint64]string{}, nil
+	}
+	query, args, err := sqlx.In(`SELECT id, username FROM users WHERE id IN (?)`, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	query = r.db.Rebind(query)
+	var rows []struct {
+		ID       uint64 `db:"id"`
+		Username string `db:"username"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, err
+	}
+	result := make(map[uint64]string, len(rows))
+	for _, row := range rows {
+		result[row.ID] = row.Username
+	}
+	return result, nil
+}

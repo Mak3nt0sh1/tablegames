@@ -15,14 +15,18 @@ import (
 )
 
 var (
-	ErrRoomNotFound  = errors.New("room not found")
-	ErrRoomFull      = errors.New("room is full")
-	ErrRoomNotAvail  = errors.New("room is not available")
-	ErrInvalidInvite = errors.New("invalid or expired invite")
-	ErrForbidden     = errors.New("forbidden")
-	ErrWrongPassword = errors.New("wrong password")
-	ErrNotMember     = errors.New("not a member of this room")
+	ErrRoomNotFound      = errors.New("room not found")
+	ErrRoomFull          = errors.New("room is full")
+	ErrRoomNotAvail      = errors.New("room is not available")
+	ErrInvalidInvite     = errors.New("invalid or expired invite")
+	ErrForbidden         = errors.New("forbidden")
+	ErrWrongPassword     = errors.New("wrong password")
+	ErrNotMember         = errors.New("not a member of this room")
+	ErrUnsupportedGame   = errors.New("unsupported game type")
 )
+
+// SupportedGames — список поддерживаемых игр (дублируем чтобы не импортировать game пакет)
+var supportedGames = map[string]bool{"uno": true}
 
 type Service struct {
 	repo *Repository
@@ -75,7 +79,7 @@ func (s *Service) IsMember(ctx context.Context, roomID, userID uint64) (bool, er
 }
 
 // UpdateRoom — хост меняет настройки комнаты
-func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64, name string, maxPlayers int, password *string) (*models.Room, error) {
+func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64, name string, maxPlayers int, password *string, gameType string) (*models.Room, error) {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {
 		return nil, ErrRoomNotFound
@@ -108,6 +112,12 @@ func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64
 			h := string(hash)
 			room.PasswordHash = &h
 		}
+	}
+	if gameType != "" {
+		if !supportedGames[gameType] {
+			return nil, ErrUnsupportedGame
+		}
+		room.GameType = gameType
 	}
 	if err := s.repo.UpdateRoom(ctx, room); err != nil {
 		return nil, err

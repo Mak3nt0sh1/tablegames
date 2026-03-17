@@ -19,6 +19,7 @@ type Handler struct {
 type Hub interface {
 	KickClient(roomUUID string, targetUserID, byUserID uint64)
 	NotifyRoomDeleted(roomUUID string)
+	NotifyGameSelected(roomUUID string, gameType string)
 }
 
 func NewHandler(svc *Service, hub Hub) *Handler {
@@ -70,13 +71,14 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name       string  `json:"name"`
 		MaxPlayers int     `json:"max_players"`
-		Password   *string `json:"password"` // nil = не менять, "" = убрать, "xxx" = установить
+		Password   *string `json:"password"`  // nil = не менять, "" = убрать, "xxx" = установить
+		GameType   string  `json:"game_type"` // "" = не менять
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	room, err := h.svc.UpdateRoom(r.Context(), uuid, hostID, req.Name, req.MaxPlayers, req.Password)
+	room, err := h.svc.UpdateRoom(r.Context(), uuid, hostID, req.Name, req.MaxPlayers, req.Password, req.GameType)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrForbidden):
@@ -87,6 +89,10 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 		}
 		return
+	}
+	// Если хост выбрал игру — уведомляем всех через WS
+	if req.GameType != "" {
+		h.hub.NotifyGameSelected(uuid, room.GameType)
 	}
 	writeJSON(w, http.StatusOK, toRoomJSON(room))
 }
@@ -207,6 +213,7 @@ func toRoomJSON(room *models.Room) map[string]any {
 		"invite_code":  room.InviteCode,
 		"max_players":  room.MaxPlayers,
 		"status":       room.Status,
+		"game_type":    room.GameType,
 		"has_password": room.HasPassword(),
 		"created_at":   room.CreatedAt,
 		"expires_at":   room.ExpiresAt,

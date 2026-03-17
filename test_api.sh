@@ -4,14 +4,12 @@ BASE="http://localhost:8080"
 PASS=0
 FAIL=0
 
-# Чистим тестовых пользователей перед каждым запуском
-mysql -u root tablegames 2>/dev/null << 'SQL'
+sudo mysql tablegames << 'SQL'
 DELETE rm FROM room_members rm JOIN users u ON rm.user_id = u.id WHERE u.email IN ('vasya@test.com','petya@test.com');
 DELETE ri FROM room_invites ri JOIN users u ON ri.invited_by = u.id WHERE u.email IN ('vasya@test.com','petya@test.com');
 DELETE r FROM rooms r JOIN users u ON r.host_id = u.id WHERE u.email IN ('vasya@test.com','petya@test.com');
 DELETE FROM users WHERE email IN ('vasya@test.com','petya@test.com');
 SQL
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 GREEN='\033[0;32m'

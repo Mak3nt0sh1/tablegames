@@ -63,3 +63,9 @@ func generateJWT(user *models.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 }
+
+
+// GetUsernames — возвращает map userID -> username для списка ID
+func (s *Service) GetUsernames(ctx context.Context, userIDs []uint64) (map[uint64]string, error) {
+	return s.repo.GetUsernames(ctx, userIDs)
+}
