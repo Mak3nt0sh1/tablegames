@@ -1,54 +1,96 @@
-import { Users } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import { createRoomApi } from "../api/mockApi";
+import { useState } from 'react';
+import { Users, Plus, LogIn } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { rooms, join } from '../api/client';
 
 export default function Lobby() {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [showJoin, setShowJoin] = useState(false);
 
-  const handleCreateRoom = () => {
-    // Вызываем фейковый API без блокировки потока, 
-    // чтобы мгновенно перекинуть пользователя в комнату
-    createRoomApi().then((newRoom) => {
-      navigate(`/${newRoom.id}`);
-    }).catch(err => {
-      console.error("Ошибка при создании:", err);
-      // Если API упал, всё равно создаем фейковую для теста фронта
-      const fallbackId = "room-" + Math.random().toString(36).substring(2, 9);
-      navigate(`/${fallbackId}`);
-    });
+  // Создать комнату
+  const handleCreateRoom = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const room = await rooms.create({ name: 'Моя комната', max_players: 4 });
+      navigate(`/${room.uuid}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка создания комнаты');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Войти по коду
+  const handleJoinByCode = async () => {
+    if (!joinCode.trim()) return;
+    setError('');
+    setLoading(true);
+    try {
+      const room = await join.byCode(joinCode.trim().toUpperCase());
+      navigate(`/${room.uuid}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Неверный код комнаты');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      
-      {/* Карточка "Создать стол" - теперь это кнопка! */}
-      <button 
-        onClick={handleCreateRoom}
-        className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-indigo-500/50 hover:bg-gray-800/50 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[200px] gap-4 w-full text-left"
-      >
-        <div className="w-12 h-12 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-2xl">+</div>
-        <h3 className="font-semibold text-lg text-white">Создать пустую комнату</h3>
-      </button>
+    <div className="space-y-6">
+      {error && (
+        <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+          {error}
+        </p>
+      )}
 
-      {/* Пример уже созданного стола */}
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col justify-between min-h-[200px]">
-        <div>
-          <div className="flex justify-between items-start mb-4">
-            <h3 className="font-bold text-white text-lg">Монополия</h3>
-            <span className="bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded-md font-medium">Ожидание</span>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        {/* Создать комнату */}
+        <button
+          onClick={handleCreateRoom}
+          disabled={loading}
+          className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-indigo-500/50 hover:bg-gray-800/50 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[200px] gap-4 w-full disabled:opacity-50"
+        >
+          <div className="w-12 h-12 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <Plus size={24} />
           </div>
-          <p className="text-gray-400 text-sm">Хост: Mak3nt0sh1</p>
-        </div>
-        <div className="flex items-center justify-between mt-4">
-          <div className="flex items-center gap-2 text-gray-400 text-sm">
-            <Users size={16} /> 2/4
+          <h3 className="font-semibold text-lg text-white">
+            {loading ? 'Создаём...' : 'Создать комнату'}
+          </h3>
+        </button>
+
+        {/* Войти по коду */}
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col justify-between min-h-[200px]">
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <LogIn size={20} className="text-indigo-400" />
+              <h3 className="font-bold text-white text-lg">Войти по коду</h3>
+            </div>
+            <input
+              type="text"
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode()}
+              maxLength={8}
+              placeholder="XXXXXXXX"
+              className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white text-center tracking-widest font-mono text-lg focus:outline-none focus:border-indigo-500"
+            />
           </div>
-          <button className="bg-gray-800 hover:bg-gray-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
-            Войти
+          <button
+            onClick={handleJoinByCode}
+            disabled={loading || !joinCode.trim()}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-medium rounded-xl px-4 py-3 mt-4 transition-colors flex items-center justify-center gap-2"
+          >
+            <Users size={16} />
+            Войти в комнату
           </button>
         </div>
-      </div>
 
+      </div>
     </div>
   );
 }

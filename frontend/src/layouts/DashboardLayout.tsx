@@ -1,9 +1,10 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Gamepad2, User, Settings as SettingsIcon, LogOut } from "lucide-react";
-import { currentUser } from "../api/mockApi";
+import { auth } from "../api/client";
 
 export default function DashboardLayout() {
   const location = useLocation(); // Хук для определения текущей страницы
+  const currentUser = auth.me();
 
   const navItems = [
     { path: "/", label: "Игровое Лобби", icon: <Gamepad2 size={20} /> },
@@ -52,7 +53,7 @@ export default function DashboardLayout() {
           </h2>
           <div className="flex items-center gap-3 cursor-pointer hover:bg-gray-800 p-2 rounded-lg transition-colors">
             <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-full"></div>
-            <span className="font-medium">{currentUser.username}</span>
+            <span className="font-medium">{currentUser?.username ?? "Гость"}</span>
           </div>
         </header>
 

@@ -1,13 +1,76 @@
-import { useState } from "react";
-import { useParams } from "react-router-dom";
-import { Copy, Check, UserPlus, Play, Settings } from "lucide-react";
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Copy, Check, UserPlus, Play, Settings, LogOut, Crown } from 'lucide-react';
+import { rooms, game, auth } from '../api/client';
+import { useWebSocket } from '../hooks/useWebSocket';
+import type { Room as RoomType } from '../types';
+import type { RoomStatePayload } from '../types';
+
+interface Player {
+  user_id: number;
+  username: string;
+  role: 'host' | 'player';
+}
 
 export default function Room() {
-  const { roomId } = useParams(); // Получаем ID комнаты из URL
-  const [isCopied, setIsCopied] = useState(false);
-  const [selectedGame, setSelectedGame] = useState("Не выбрана");
+  const { roomId } = useParams<{ roomId: string }>();
+  const navigate = useNavigate();
 
-  const inviteLink = `http://localhost:5173/${roomId}`;
+  const me = auth.me();
+  const [room, setRoom] = useState<RoomType | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [isCopied, setIsCopied] = useState(false);
+  const [selectedGame, setSelectedGame] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [starting, setStarting] = useState(false);
+
+  const isHost = room?.host_id === me?.id;
+
+  // Загружаем данные комнаты
+  useEffect(() => {
+    if (!roomId) return;
+    rooms.get(roomId)
+      .then((r) => {
+        setRoom(r);
+        setSelectedGame(r.game_type || '');
+      })
+      .catch(() => navigate('/'))
+      .finally(() => setLoading(false));
+  }, [roomId]);
+
+  // WebSocket — реалтайм обновления
+  const { sendChat } = useWebSocket(roomId ?? null, {
+    onRoomState: (payload: RoomStatePayload) => {
+      setPlayers(payload.players);
+    },
+    onPlayerJoined: (payload) => {
+      setPlayers((prev) => {
+        if (prev.find((p) => p.user_id === payload.player.user_id)) return prev;
+        return [...prev, payload.player as Player];
+      });
+    },
+    onPlayerLeft: (payload) => {
+      setPlayers((prev) => prev.filter((p) => p.user_id !== payload.user_id));
+    },
+    onGameSelected: (payload) => {
+      setSelectedGame(payload.game_type);
+    },
+    onGameStarted: () => {
+      navigate(`/${roomId}/game`);
+    },
+    onPlayerKicked: (payload) => {
+      if (payload.by_user_id !== me?.id) {
+        // Нас кикнули
+        navigate('/');
+      }
+    },
+    onRoomDeleted: () => {
+      navigate('/');
+    },
+  });
+
+  const inviteLink = `${window.location.origin}/${roomId}`;
 
   const copyLink = () => {
     navigator.clipboard.writeText(inviteLink);
@@ -15,58 +78,160 @@ export default function Room() {
     setTimeout(() => setIsCopied(false), 2000);
   };
 
+  // Хост выбирает игру
+  const handleSelectGame = async (gameType: string) => {
+    if (!roomId || !isHost) return;
+    setSelectedGame(gameType);
+    try {
+      await rooms.update(roomId, { game_type: gameType as 'uno' });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка');
+    }
+  };
+
+  // Старт игры
+  const handleStartGame = async () => {
+    if (!roomId || !selectedGame) return;
+    setStarting(true);
+    setError('');
+    try {
+      await game.start(roomId, selectedGame);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка запуска');
+      setStarting(false);
+    }
+  };
+
+  // Выйти из комнаты
+  const handleLeave = async () => {
+    if (!roomId) return;
+    try {
+      if (isHost) {
+        await rooms.delete(roomId);
+      } else {
+        await rooms.leave(roomId);
+      }
+    } finally {
+      navigate('/');
+    }
+  };
+
+  // Кикнуть игрока
+  const handleKick = async (userId: number) => {
+    if (!roomId) return;
+    try {
+      await rooms.kick(roomId, userId);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-gray-400">Загрузка комнаты...</div>
+      </div>
+    );
+  }
+
+  if (!room) return null;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      
-      {/* Левая колонка: Игроки и Настройки (занимает 2 части) */}
+
+      {/* Левая колонка */}
       <div className="lg:col-span-2 space-y-6">
-        
-        {/* Блок со ссылкой-приглашением */}
+
+        {error && (
+          <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+            {error}
+          </p>
+        )}
+
+        {/* Инвайт блок */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             <UserPlus size={20} className="text-indigo-400" />
             Пригласить друзей
           </h3>
-          <div className="flex items-center gap-2">
-            <input 
-              type="text" 
-              readOnly 
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              type="text"
+              readOnly
               value={inviteLink}
               className="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-gray-300 focus:outline-none"
             />
-            <button 
+            <button
               onClick={copyLink}
               className={`px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 ${
-                isCopied ? "bg-green-500/20 text-green-400" : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                isCopied ? 'bg-green-500/20 text-green-400' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
               }`}
             >
               {isCopied ? <><Check size={18} /> Скопировано</> : <><Copy size={18} /> Копировать</>}
             </button>
           </div>
+          <p className="text-gray-500 text-sm">
+            Код комнаты: <span className="font-mono text-indigo-400 font-bold tracking-widest">{room.invite_code}</span>
+          </p>
         </div>
 
-        {/* Блок списка игроков в комнате */}
+        {/* Список игроков */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 min-h-[300px]">
-          <h3 className="text-lg font-bold text-white mb-4">Ожидание игроков (1/4)</h3>
+          <h3 className="text-lg font-bold text-white mb-4">
+            Игроки ({players.length}/{room.max_players})
+          </h3>
           <div className="space-y-3">
-            {/* Карточка хоста */}
-            <div className="flex items-center justify-between bg-gray-950 border border-indigo-500/30 p-4 rounded-xl">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-full"></div>
-                <span className="font-medium text-white">Mak3nt0sh1 <span className="text-indigo-400 text-xs ml-2">(Хост)</span></span>
+            {players.map((player) => (
+              <div
+                key={player.user_id}
+                className={`flex items-center justify-between p-4 rounded-xl ${
+                  player.role === 'host'
+                    ? 'bg-gray-950 border border-indigo-500/30'
+                    : 'bg-gray-950 border border-gray-800'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                    {player.username[0].toUpperCase()}
+                  </div>
+                  <span className="font-medium text-white">
+                    {player.username}
+                    {player.role === 'host' && (
+                      <span className="ml-2 text-indigo-400 text-xs inline-flex items-center gap-1">
+                        <Crown size={12} /> Хост
+                      </span>
+                    )}
+                    {player.user_id === me?.id && (
+                      <span className="ml-2 text-gray-500 text-xs">(вы)</span>
+                    )}
+                  </span>
+                </div>
+                {isHost && player.role !== 'host' && (
+                  <button
+                    onClick={() => handleKick(player.user_id)}
+                    className="text-red-400 hover:text-red-300 text-xs px-3 py-1 rounded-lg hover:bg-red-500/10 transition-colors"
+                  >
+                    Кик
+                  </button>
+                )}
               </div>
-            </div>
-            
+            ))}
+
             {/* Пустые слоты */}
-            <div className="flex items-center gap-3 bg-gray-950 border border-dashed border-gray-800 p-4 rounded-xl text-gray-500">
-              <div className="w-10 h-10 rounded-full border border-dashed border-gray-700 flex items-center justify-center">+</div>
-              <span>Ожидание подключения...</span>
-            </div>
+            {Array.from({ length: room.max_players - players.length }).map((_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 bg-gray-950 border border-dashed border-gray-800 p-4 rounded-xl text-gray-500"
+              >
+                <div className="w-10 h-10 rounded-full border border-dashed border-gray-700 flex items-center justify-center">+</div>
+                <span>Ожидание подключения...</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Правая колонка: Выбор игры и старт */}
+      {/* Правая колонка */}
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col">
         <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
           <Settings size={20} className="text-gray-400" />
@@ -76,34 +241,50 @@ export default function Room() {
         <div className="space-y-5 flex-1">
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-2">Во что играем?</label>
-            <select 
-              value={selectedGame}
-              onChange={(e) => setSelectedGame(e.target.value)}
-              className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
-            >
-              <option disabled>Не выбрана</option>
-              <option>Шахматы</option>
-              <option>Монополия</option>
-              <option>Дурак</option>
-            </select>
+            {isHost ? (
+              <select
+                value={selectedGame}
+                onChange={(e) => handleSelectGame(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">Не выбрана</option>
+                <option value="uno">UNO</option>
+              </select>
+            ) : (
+              <div className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-gray-400">
+                {selectedGame ? selectedGame.toUpperCase() : 'Хост выбирает игру...'}
+              </div>
+            )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Видимость</label>
-            <div className="flex bg-gray-950 border border-gray-800 rounded-xl p-1">
-              <button className="flex-1 py-2 text-sm font-medium bg-gray-800 text-white rounded-lg">По ссылке</button>
-              <button className="flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors">Публичная</button>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Игроков</label>
+            <div className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-gray-300">
+              {players.length} / {room.max_players}
             </div>
           </div>
         </div>
 
-        <button 
-          disabled={selectedGame === "Не выбрана"}
-          className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 mt-6 transition-colors flex items-center justify-center gap-2"
-        >
-          <Play size={20} />
-          Начать игру
-        </button>
+        <div className="space-y-3 mt-6">
+          {isHost && (
+            <button
+              onClick={handleStartGame}
+              disabled={!selectedGame || starting || players.length < 2}
+              className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2"
+            >
+              <Play size={20} />
+              {starting ? 'Запускаем...' : players.length < 2 ? 'Нужно 2+ игроков' : 'Начать игру'}
+            </button>
+          )}
+
+          <button
+            onClick={handleLeave}
+            className="w-full bg-gray-800 hover:bg-red-500/20 hover:text-red-400 text-gray-400 font-medium rounded-xl px-4 py-3 transition-colors flex items-center justify-center gap-2"
+          >
+            <LogOut size={18} />
+            {isHost ? 'Закрыть комнату' : 'Покинуть комнату'}
+          </button>
+        </div>
       </div>
 
     </div>

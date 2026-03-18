@@ -1,12 +1,18 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import DashboardLayout from "./layouts/DashboardLayout";
-import AuthLayout from "./layouts/AuthLayout";
-import Lobby from "./pages/Lobby";
-import Profile from "./pages/Profile";
-import Settings from "./pages/Settings";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import Room from "./pages/Room"; // <-- Импортируем новую страницу
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import DashboardLayout from './layouts/DashboardLayout';
+import AuthLayout from './layouts/AuthLayout';
+import Lobby from './pages/Lobby';
+import Profile from './pages/Profile';
+import Settings from './pages/Settings';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Room from './pages/Room';
+import { token } from './api/client';
+
+// Защищённый роут — редиректит на /login если нет токена
+function PrivateRoute({ children }: { children: React.ReactNode }) {
+  return token.get() ? <>{children}</> : <Navigate to="/login" replace />;
+}
 
 export default function App() {
   return (
@@ -17,10 +23,16 @@ export default function App() {
           <Route path="/register" element={<Register />} />
         </Route>
 
-        <Route path="/" element={<DashboardLayout />}>
+        <Route
+          path="/"
+          element={
+            <PrivateRoute>
+              <DashboardLayout />
+            </PrivateRoute>
+          }
+        >
           <Route index element={<Lobby />} />
-          {/* Динамический путь для комнаты: ID комнаты будет доступен через useParams */}
-          <Route path=":roomId" element={<Room />} /> 
+          <Route path=":roomId" element={<Room />} />
           <Route path="profile" element={<Profile />} />
           <Route path="settings" element={<Settings />} />
         </Route>
