@@ -115,3 +115,8 @@ func (r *Repository) UpdateInviteStatus(ctx context.Context, id uint64, status s
 	_, err := r.db.ExecContext(ctx, `UPDATE room_invites SET status = ? WHERE id = ?`, status, id)
 	return err
 }
+
+func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ? WHERE id = ?`, status, roomID)
+	return err
+}
