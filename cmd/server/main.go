@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"tablegames/internal/auth"
+	game "tablegames/internal/game"
 	"tablegames/internal/middleware"
 	"tablegames/internal/room"
 	"tablegames/internal/ws"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 )
 
@@ -38,12 +40,25 @@ func main() {
 	roomSvc := room.NewService(roomRepo)
 	roomHandler := room.NewHandler(roomSvc, hub)
 
+	// game
+	gameMgr := game.NewManager(hub, roomSvc, authSvc)
+	gameHandler := game.NewHandler(gameMgr)
+
 	// websocket handler
 	wsHandler := ws.NewHandler(hub, roomSvc)
 
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.Logger)
 	r.Use(chiMiddleware.Recoverer)
+
+	// CORS — разрешаем запросы с фронтенда
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000"},
+		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 
 	// публичные маршруты
 	r.Post("/api/auth/register", authHandler.Register)
@@ -67,6 +82,14 @@ func main() {
 		r.Post("/api/rooms/{uuid}/invite", roomHandler.CreateInviteLink)
 		r.Post("/api/join/code/{code}", roomHandler.JoinByCode)
 		r.Post("/api/join/token/{token}", roomHandler.JoinByToken)
+
+		// игра
+		r.Post("/api/rooms/{uuid}/game/start", gameHandler.StartGame)
+		r.Get("/api/rooms/{uuid}/game/state", gameHandler.GetGameState)
+		r.Post("/api/rooms/{uuid}/game/play", gameHandler.PlayCard)
+		r.Post("/api/rooms/{uuid}/game/draw", gameHandler.DrawCard)
+		r.Post("/api/rooms/{uuid}/game/uno", gameHandler.SayUno)
+		r.Post("/api/rooms/{uuid}/game/challenge", gameHandler.ChallengeUno)
 
 		// websocket
 		r.Get("/api/rooms/{uuid}/ws", wsHandler.ServeWS)

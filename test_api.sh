@@ -4,14 +4,12 @@ BASE="http://localhost:8080"
 PASS=0
 FAIL=0
 
-# Чистим тестовых пользователей перед каждым запуском
-mysql -u root tablegames 2>/dev/null << 'SQL'
+sudo mysql tablegames << 'SQL'
 DELETE rm FROM room_members rm JOIN users u ON rm.user_id = u.id WHERE u.email IN ('vasya@test.com','petya@test.com');
 DELETE ri FROM room_invites ri JOIN users u ON ri.invited_by = u.id WHERE u.email IN ('vasya@test.com','petya@test.com');
 DELETE r FROM rooms r JOIN users u ON r.host_id = u.id WHERE u.email IN ('vasya@test.com','petya@test.com');
 DELETE FROM users WHERE email IN ('vasya@test.com','petya@test.com');
 SQL
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 GREEN='\033[0;32m'
@@ -228,7 +226,81 @@ RES=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/rooms/$ROOM_UUID/leave" \
 BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
 check_status "Хост не может выйти → 400" "$BODY" "$CODE" 400
 
-# ── 5. DELETE ROOM ────────────────────────────────────────────────────────────
+# ── 5. GAME SELECTION ─────────────────────────────────────────────────────────
+
+section "GAME SELECTION"
+
+# Создаём новую комнату для тестов выбора игры
+RES=$(curl -s -X POST "$BASE/api/rooms" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Game Select Test","max_players":4}')
+GS_UUID=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('uuid',''))" 2>/dev/null)
+GS_CODE=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('invite_code',''))" 2>/dev/null)
+
+# Петя заходит
+curl -s -X POST "$BASE/api/join/code/$GS_CODE" \
+  -H "Authorization: Bearer $TOKEN_PETYA" \
+  -H "Content-Type: application/json" -d '{}' > /dev/null
+
+# Хост выбирает UNO
+RES=$(curl -s -w "\n%{http_code}" -X PATCH "$BASE/api/rooms/$GS_UUID" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"game_type":"uno"}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Хост выбирает UNO" "$BODY" "$CODE" 200
+
+# Проверяем что game_type сохранился
+GAME_TYPE=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('game_type',''))" 2>/dev/null)
+[ "$GAME_TYPE" = "uno" ] && ok "game_type=uno в ответе" || fail "game_type в ответе" "получено: $GAME_TYPE"
+
+# Не-хост не может выбрать игру → 403
+RES=$(curl -s -w "\n%{http_code}" -X PATCH "$BASE/api/rooms/$GS_UUID" \
+  -H "Authorization: Bearer $TOKEN_PETYA" \
+  -H "Content-Type: application/json" \
+  -d '{"game_type":"uno"}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Не-хост не может выбрать игру → 403" "$BODY" "$CODE" 403
+
+# Неподдерживаемая игра → 400
+RES=$(curl -s -w "\n%{http_code}" -X PATCH "$BASE/api/rooms/$GS_UUID" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"game_type":"chess"}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Неподдерживаемая игра → 400" "$BODY" "$CODE" 400
+
+# Хост запускает игру — game_type уже выбран
+RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$GS_UUID/game/start" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Старт игры после выбора" "$BODY" "$CODE" 200
+
+# Получить состояние игры
+RES=$(curl -s -w "\n%{http_code}" "$BASE/api/rooms/$GS_UUID/game/state" \
+  -H "Authorization: Bearer $TOKEN_VASYA")
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Получить состояние игры" "$BODY" "$CODE" 200
+PHASE=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('phase',''))" 2>/dev/null)
+[ "$PHASE" = "playing" ] && ok "Фаза: playing" || fail "Фаза игры" "получено: $PHASE"
+
+# Не-хост не может запустить игру → 400
+RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$GS_UUID/game/start" \
+  -H "Authorization: Bearer $TOKEN_PETYA" \
+  -H "Content-Type: application/json" \
+  -d '{}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Повторный старт → 400" "$BODY" "$CODE" 400
+
+# Удаляем тестовую комнату
+curl -s -X DELETE "$BASE/api/rooms/$GS_UUID" \
+  -H "Authorization: Bearer $TOKEN_VASYA" > /dev/null
+
+# ── 6. DELETE ROOM ─────────────────────────────────────────────────────────────
+# ── 7. DELETE ROOM ────────────────────────────────────────────────────────────
 
 section "DELETE ROOM"
 
@@ -250,7 +322,7 @@ RES=$(curl -s -w "\n%{http_code}" "$BASE/api/rooms/$ROOM_UUID" \
 BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
 check_status "Удалённая комната → 404" "$BODY" "$CODE" 404
 
-# ── 6. WEBSOCKET ─────────────────────────────────────────────────────────────
+# ── 8. WEBSOCKET ─────────────────────────────────────────────────────────────
 
 section "WEBSOCKET"
 

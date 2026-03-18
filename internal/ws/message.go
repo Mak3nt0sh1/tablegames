@@ -25,6 +25,7 @@ const (
 	EventError         = "error"
 
 	EventVoiceUserJoined = "voice_user_joined"
+	EventGameSelected    = "game_selected" // хост выбрал игру
 	EventVoiceUserLeft   = "voice_user_left"
 
 	EventPlayerKicked = "player_kicked" // конкретному игроку

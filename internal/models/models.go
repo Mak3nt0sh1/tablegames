@@ -19,6 +19,7 @@ type Room struct {
 	HostID       uint64    `db:"host_id"       json:"host_id"`
 	InviteCode   string    `db:"invite_code"   json:"invite_code"`
 	PasswordHash *string   `db:"password_hash" json:"-"`
+	GameType     string    `db:"game_type"     json:"game_type"`
 	MaxPlayers   int       `db:"max_players"   json:"max_players"`
 	Status       string    `db:"status"        json:"status"`
 	CreatedAt    time.Time `db:"created_at"    json:"created_at"`

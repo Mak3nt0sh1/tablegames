@@ -32,8 +32,8 @@ func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) error {
 
 func (r *Repository) UpdateRoom(ctx context.Context, room *models.Room) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE rooms SET name = ?, max_players = ?, password_hash = ? WHERE id = ?`,
-		room.Name, room.MaxPlayers, room.PasswordHash, room.ID,
+		`UPDATE rooms SET name = ?, max_players = ?, password_hash = ?, game_type = ? WHERE id = ?`,
+		room.Name, room.MaxPlayers, room.PasswordHash, room.GameType, room.ID,
 	)
 	return err
 }
@@ -113,5 +113,10 @@ func (r *Repository) FindInviteByToken(ctx context.Context, token string) (*mode
 
 func (r *Repository) UpdateInviteStatus(ctx context.Context, id uint64, status string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE room_invites SET status = ? WHERE id = ?`, status, id)
+	return err
+}
+
+func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ? WHERE id = ?`, status, roomID)
 	return err
 }
