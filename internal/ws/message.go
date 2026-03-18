@@ -25,11 +25,11 @@ const (
 	EventError         = "error"
 
 	EventVoiceUserJoined = "voice_user_joined"
-	EventGameSelected    = "game_selected"     // хост выбрал игру
+	EventGameSelected    = "game_selected" // хост выбрал игру
 	EventVoiceUserLeft   = "voice_user_left"
 
-	EventPlayerKicked   = "player_kicked"    // конкретному игроку
-	EventRoomDeleted    = "room_deleted"     // всем в комнате
+	EventPlayerKicked = "player_kicked" // конкретному игроку
+	EventRoomDeleted  = "room_deleted"  // всем в комнате
 )
 
 // Message — базовый конверт для всех WS-сообщений

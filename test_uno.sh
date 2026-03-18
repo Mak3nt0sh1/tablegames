@@ -212,41 +212,38 @@ section "MOVE 2 - $SECOND_NAME"
 SECOND_STATE=$(get_state "$SECOND_TOKEN")
 ACTUAL_TURN=$(echo "$SECOND_STATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('current_turn',''))" 2>/dev/null)
 if [ "$ACTUAL_TURN" != "$SECOND_ID" ]; then
-  info "Skip/Reverse effect: turn stayed with $FIRST_NAME (ID=$ACTUAL_TURN) — skipping move 2 test"
-  SECOND_STATE=$(get_state "$FIRST_TOKEN")
-  SECOND_TOKEN_TMP=$FIRST_TOKEN
-  SECOND_NAME_TMP=$FIRST_NAME
+  info "Skip/Reverse effect: turn stayed with $FIRST_NAME — skipping move 2 test"
+  ok "Move 2 skipped (Skip/Reverse in effect)"
 else
-  SECOND_TOKEN_TMP=$SECOND_TOKEN
-  SECOND_NAME_TMP=$SECOND_NAME
-fi
-TOP=$(echo "$SECOND_STATE" | python3 -c "
+  SECOND_STATE=$(get_state "$SECOND_TOKEN")
+  TOP=$(echo "$SECOND_STATE" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 t=d.get('top_card',{})
 print(f\"[{t.get('color','')} {t.get('value','')}]  color: {d.get('current_color','')}\")
 " 2>/dev/null)
-info "Top card: $TOP"
+  info "Top card: $TOP"
 
-CARD_ID=$(find_playable "$SECOND_STATE")
-if [ -n "$CARD_ID" ]; then
-  CARD_INFO=$(echo "$SECOND_STATE" | python3 -c "
+  CARD_ID=$(find_playable "$SECOND_STATE")
+  if [ -n "$CARD_ID" ]; then
+    CARD_INFO=$(echo "$SECOND_STATE" | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 for c in d.get('your_hand',[]):
     if c['id']==$CARD_ID: print(f\"[{c['color']} {c['value']}]\")
 " 2>/dev/null)
-  info "$SECOND_NAME plays card $CARD_INFO (id=$CARD_ID)"
-  RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$ROOM_UUID/game/play" \
-    -H "Authorization: Bearer $SECOND_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"card_id\": $CARD_ID}")
-  BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
-  [ "$CODE" = "200" ] && ok "$SECOND_NAME played card $CARD_INFO" || fail "$SECOND_NAME PlayCard" "HTTP $CODE: $BODY"
-else
-  info "$SECOND_NAME draws card  "
-  RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$ROOM_UUID/game/draw" \
-    -H "Authorization: Bearer $SECOND_TOKEN")
-  BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
-  [ "$CODE" = "200" ] && ok "$SECOND_NAME drew from deck" || fail "$SECOND_NAME DrawCard" "HTTP $CODE: $BODY"
+    info "$SECOND_NAME plays card $CARD_INFO (id=$CARD_ID)"
+    RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$ROOM_UUID/game/play" \
+      -H "Authorization: Bearer $SECOND_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"card_id\": $CARD_ID}")
+    BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+    [ "$CODE" = "200" ] && ok "$SECOND_NAME played card $CARD_INFO" || fail "$SECOND_NAME PlayCard" "HTTP $CODE: $BODY"
+  else
+    info "$SECOND_NAME draws from deck"
+    RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$ROOM_UUID/game/draw" \
+      -H "Authorization: Bearer $SECOND_TOKEN")
+    BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+    [ "$CODE" = "200" ] && ok "$SECOND_NAME drew from deck" || fail "$SECOND_NAME DrawCard" "HTTP $CODE: $BODY"
+  fi
 fi
 
 # -- TURN PROTECTION --------------------------------------------------------

@@ -15,14 +15,14 @@ import (
 )
 
 var (
-	ErrRoomNotFound      = errors.New("room not found")
-	ErrRoomFull          = errors.New("room is full")
-	ErrRoomNotAvail      = errors.New("room is not available")
-	ErrInvalidInvite     = errors.New("invalid or expired invite")
-	ErrForbidden         = errors.New("forbidden")
-	ErrWrongPassword     = errors.New("wrong password")
-	ErrNotMember         = errors.New("not a member of this room")
-	ErrUnsupportedGame   = errors.New("unsupported game type")
+	ErrRoomNotFound    = errors.New("room not found")
+	ErrRoomFull        = errors.New("room is full")
+	ErrRoomNotAvail    = errors.New("room is not available")
+	ErrInvalidInvite   = errors.New("invalid or expired invite")
+	ErrForbidden       = errors.New("forbidden")
+	ErrWrongPassword   = errors.New("wrong password")
+	ErrNotMember       = errors.New("not a member of this room")
+	ErrUnsupportedGame = errors.New("unsupported game type")
 )
 
 // SupportedGames — список поддерживаемых игр (дублируем чтобы не импортировать game пакет)
@@ -255,4 +255,13 @@ func generateToken() (string, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	return hex.EncodeToString(b), err
+}
+
+// SetRoomStatus — обновляет статус комнаты (вызывается из game.Manager)
+func (s *Service) SetRoomStatus(ctx context.Context, roomUUID string, status string) error {
+	room, err := s.repo.FindByUUID(ctx, roomUUID)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	return s.repo.UpdateStatus(ctx, room.ID, status)
 }
