@@ -26,6 +26,7 @@ type RoomService interface {
 	GetRoom(ctx context.Context, uuid string) (*models.Room, error)
 	GetMembers(ctx context.Context, roomID uint64) ([]models.RoomMember, error)
 	SetRoomStatus(ctx context.Context, roomUUID string, status string) error
+	SaveGameResults(ctx context.Context, roomID uint64, gameType string, winnerID uint64, scores map[uint64]int) error
 }
 
 // UserService — получение информации о пользователях
@@ -33,10 +34,17 @@ type UserService interface {
 	GetUsernames(ctx context.Context, userIDs []uint64) (map[uint64]string, error)
 }
 
+// gameInfo хранит игру вместе с метаданными
+type gameInfo struct {
+	game     *uno.Game
+	roomID   uint64
+	gameType GameType
+}
+
 // Manager управляет всеми запущенными играми
 type Manager struct {
 	mu            sync.RWMutex
-	games         map[string]*uno.Game // roomUUID -> активная игра
+	games         map[string]*gameInfo // roomUUID -> активная игра
 	finishedGames map[string]*uno.Game // roomUUID -> завершённая игра (для реконнекта)
 	hub           Hub
 	roomSvc       RoomService
@@ -45,7 +53,7 @@ type Manager struct {
 
 func NewManager(hub Hub, roomSvc RoomService, userSvc UserService) *Manager {
 	return &Manager{
-		games:         make(map[string]*uno.Game),
+		games:         make(map[string]*gameInfo),
 		finishedGames: make(map[string]*uno.Game),
 		hub:           hub,
 		roomSvc:       roomSvc,
@@ -104,8 +112,9 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 	}
 
 	// Запускаем игру
-	game := uno.NewGame(roomUUID, players)
-	m.games[roomUUID] = game
+	g := uno.NewGame(roomUUID, players)
+	m.games[roomUUID] = &gameInfo{game: g, roomID: room.ID, gameType: gameType}
+	game := g
 
 	// Обновляем статус комнаты
 	_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "playing")
@@ -156,7 +165,12 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 			"scores":  scores,
 			"players": s.PublicPlayers(),
 		})
+		info := m.games[roomUUID]
 		m.finishedGames[roomUUID] = game
+		// Сохраняем результаты игры
+		if s.Winner != nil && info != nil {
+			_ = m.roomSvc.SaveGameResults(ctx, info.roomID, string(info.gameType), *s.Winner, scores)
+		}
 		delete(m.games, roomUUID)
 		_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "finished")
 		return nil
@@ -310,7 +324,7 @@ func (m *Manager) broadcastGameState(roomUUID string, game *uno.Game, event stri
 }
 
 func (m *Manager) getGame(roomUUID string) (*uno.Game, error) {
-	game, ok := m.games[roomUUID]
+	info, ok := m.games[roomUUID]
 	if !ok {
 		// Проверяем завершённые игры
 		if finished, ok := m.finishedGames[roomUUID]; ok {
@@ -318,5 +332,13 @@ func (m *Manager) getGame(roomUUID string) (*uno.Game, error) {
 		}
 		return nil, ErrNoGameRunning
 	}
-	return game, nil
+	return info.game, nil
+}
+
+func (m *Manager) getGameInfo(roomUUID string) (*gameInfo, error) {
+	info, ok := m.games[roomUUID]
+	if !ok {
+		return nil, ErrNoGameRunning
+	}
+	return info, nil
 }

@@ -1,10 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Copy, Check, UserPlus, Play, Settings, LogOut, Crown } from 'lucide-react';
 import { rooms, game, auth } from '../api/client';
+import Chat from '../components/Chat';
+import { useSound } from '../hooks/useSound';
+import { useNotifications } from '../hooks/useNotifications';
+import { getSettings } from '../hooks/useSettings';
+import VoiceChat from '../components/VoiceChat';
 import { useWebSocket } from '../hooks/useWebSocket';
 import type { Room as RoomType } from '../types';
-import type { RoomStatePayload } from '../types';
+import type { RoomStatePayload, ChatPayload } from '../types';
 
 interface Player {
   user_id: number;
@@ -25,22 +30,51 @@ export default function Room() {
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
 
-  const isHost = room?.host_id === me?.id;
+  // Чат
+  const [messages, setMessages] = useState<Array<ChatPayload & { id: number }>>([]);
+  const msgIdRef = useRef(0);
 
-  // Загружаем данные комнаты
+  // Голосовой чат
+  const [voiceUsers, setVoiceUsers] = useState<Array<{ user_id: number; username: string }>>([]);
+  const [incomingOffer, setIncomingOffer] = useState<{ from_user_id: number; sdp: string } | null>(null);
+  const [incomingAnswer, setIncomingAnswer] = useState<{ from_user_id: number; sdp: string } | null>(null);
+  const [incomingIce, setIncomingIce] = useState<{ from_user_id: number; candidate: string; sdp_mid: string; sdp_mline_index: number } | null>(null);
+
+  const isHost = room?.host_id === me?.id;
+  const { play } = useSound();
+  const { notify } = useNotifications();
+
+  // Загружаем данные комнаты — если не в комнате, автоматически вступаем
   useEffect(() => {
     if (!roomId) return;
-    rooms.get(roomId)
-      .then((r) => {
+    const init = async () => {
+      try {
+        // Сначала пробуем получить комнату
+        let r = await rooms.get(roomId);
+        // Если не являемся членом — вступаем по UUID как коду (через invite ссылку)
+        // WS подключение само проверит членство и вернёт 403 если нет
         setRoom(r);
         setSelectedGame(r.game_type || '');
-      })
-      .catch(() => navigate('/'))
-      .finally(() => setLoading(false));
+      } catch {
+        navigate('/');
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
   }, [roomId]);
 
+  // Авто-вход в войс если включено в настройках
+  const voiceChatRef = useRef<{ handleJoin: () => void } | null>(null);
+  useEffect(() => {
+    if (!loading && getSettings().voiceAutoJoin) {
+      // Небольшая задержка чтобы WS успел подключиться
+      setTimeout(() => voiceChatRef.current?.handleJoin(), 1500);
+    }
+  }, [loading]);
+
   // WebSocket — реалтайм обновления
-  const { sendChat } = useWebSocket(roomId ?? null, {
+  const { sendChat, sendVoiceJoin, sendVoiceLeave, sendVoiceOffer, sendVoiceAnswer, sendVoiceIce } = useWebSocket(roomId ?? null, {
     onRoomState: (payload: RoomStatePayload) => {
       setPlayers(payload.players);
     },
@@ -49,9 +83,12 @@ export default function Room() {
         if (prev.find((p) => p.user_id === payload.player.user_id)) return prev;
         return [...prev, payload.player as Player];
       });
+      play('player_joined');
+      notify('Игрок зашёл', `${payload.player.username} подключился к комнате`);
     },
     onPlayerLeft: (payload) => {
       setPlayers((prev) => prev.filter((p) => p.user_id !== payload.user_id));
+      play('player_left');
     },
     onGameSelected: (payload) => {
       setSelectedGame(payload.game_type);
@@ -59,18 +96,35 @@ export default function Room() {
     onGameStarted: () => {
       navigate(`/${roomId}/game`);
     },
-    onPlayerKicked: (payload) => {
-      if (payload.by_user_id !== me?.id) {
-        // Нас кикнули
-        navigate('/');
-      }
+    onPlayerKicked: () => {
+      // Это событие приходит только кикнутому игроку — просто редиректим
+      navigate('/');
     },
     onRoomDeleted: () => {
       navigate('/');
     },
+    onChatBroadcast: (payload) => {
+      setMessages((prev) => [...prev, { ...payload, id: ++msgIdRef.current }]);
+      if (payload.user_id !== me?.id) {
+        play('chat_message');
+        notify(payload.username, payload.text);
+      }
+    },
+    onVoiceUserJoined: (payload) => {
+      setVoiceUsers((prev) => {
+        if (prev.find((u) => u.user_id === payload.user_id)) return prev;
+        return [...prev, payload];
+      });
+    },
+    onVoiceUserLeft: (payload) => {
+      setVoiceUsers((prev) => prev.filter((u) => u.user_id !== payload.user_id));
+    },
+    onVoiceOffer: (payload) => setIncomingOffer(payload as any),
+    onVoiceAnswer: (payload) => setIncomingAnswer(payload as any),
+    onVoiceIceCandidate: (payload) => setIncomingIce(payload as any),
   });
 
-  const inviteLink = `${window.location.origin}/${roomId}`;
+  const inviteLink = `${window.location.origin}/join/${room?.invite_code ?? ''}`;
 
   const copyLink = () => {
     navigator.clipboard.writeText(inviteLink);
@@ -108,10 +162,14 @@ export default function Room() {
     try {
       if (isHost) {
         await rooms.delete(roomId);
+        navigate('/');
       } else {
         await rooms.leave(roomId);
+        navigate('/');
       }
-    } finally {
+    } catch (e: unknown) {
+      // Если уже вышли или комната удалена — всё равно редиректим
+      console.error('Leave error:', e);
       navigate('/');
     }
   };
@@ -229,6 +287,12 @@ export default function Room() {
             ))}
           </div>
         </div>
+      {/* Чат — показываем только если включено в настройках */}
+        {getSettings().chatVisible && <Chat
+          messages={messages}
+          currentUserId={me?.id ?? 0}
+          onSend={sendChat}
+        />}
       </div>
 
       {/* Правая колонка */}
@@ -264,6 +328,21 @@ export default function Room() {
             </div>
           </div>
         </div>
+
+        {/* Голосовой чат */}
+        <VoiceChat
+          ref={voiceChatRef}
+          currentUserId={me?.id ?? 0}
+          voiceUsers={voiceUsers}
+          onJoin={sendVoiceJoin}
+          onLeave={sendVoiceLeave}
+          onOffer={sendVoiceOffer}
+          onAnswer={sendVoiceAnswer}
+          onIce={sendVoiceIce}
+          incomingOffer={incomingOffer}
+          incomingAnswer={incomingAnswer}
+          incomingIce={incomingIce}
+        />
 
         <div className="space-y-3 mt-6">
           {isHost && (

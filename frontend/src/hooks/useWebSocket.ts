@@ -36,6 +36,11 @@ export interface WsHandlers {
   onRoomDeleted?: () => void;
   onUnoCalled?: (payload: UnoCalledPayload) => void;
   onUnoChallenge?: (payload: UnoChallengePayload) => void;
+  onVoiceUserJoined?: (payload: { user_id: number; username: string }) => void;
+  onVoiceUserLeft?: (payload: { user_id: number; username: string }) => void;
+  onVoiceOffer?: (payload: { from_user_id: number; target_user_id: number; sdp: string }) => void;
+  onVoiceAnswer?: (payload: { from_user_id: number; target_user_id: number; sdp: string }) => void;
+  onVoiceIceCandidate?: (payload: { from_user_id: number; target_user_id: number; candidate: string; sdp_mid: string; sdp_mline_index: number }) => void;
   onOpen?: () => void;
   onClose?: () => void;
   onError?: (e: Event) => void;
@@ -98,6 +103,11 @@ export function useWebSocket(roomUUID: string | null, handlers: WsHandlers) {
         case 'room_deleted':      h.onRoomDeleted?.(); break;
         case 'uno_called':        h.onUnoCalled?.(msg.payload as UnoCalledPayload); break;
         case 'uno_challenge':     h.onUnoChallenge?.(msg.payload as UnoChallengePayload); break;
+        case 'voice_user_joined': h.onVoiceUserJoined?.(msg.payload as any); break;
+        case 'voice_user_left':   h.onVoiceUserLeft?.(msg.payload as any); break;
+        case 'voice_offer':       h.onVoiceOffer?.(msg.payload as any); break;
+        case 'voice_answer':      h.onVoiceAnswer?.(msg.payload as any); break;
+        case 'voice_ice_candidate': h.onVoiceIceCandidate?.(msg.payload as any); break;
         default:
           console.log('[WS] unknown event:', msg.type, msg.payload);
       }

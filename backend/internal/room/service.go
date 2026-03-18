@@ -257,7 +257,18 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(b), err
 }
 
-// SetRoomStatus — обновляет статус комнаты (вызывается из game.Manager)
+// SaveGameResults — сохраняет результаты игры для всех участников
+func (s *Service) SaveGameResults(ctx context.Context, roomID uint64, gameType string, winnerID uint64, scores map[uint64]int) error {
+	for userID, score := range scores {
+		result := "lose"
+		if userID == winnerID {
+			result = "win"
+		}
+		_ = s.repo.SaveGameResult(ctx, roomID, userID, gameType, result, score)
+	}
+	return nil
+}
+
 func (s *Service) SetRoomStatus(ctx context.Context, roomUUID string, status string) error {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {

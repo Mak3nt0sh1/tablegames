@@ -149,3 +149,43 @@ export const wsUrl = (roomUUID: string): string => {
   const t = token.get();
   return `ws://localhost:8080/api/rooms/${roomUUID}/ws?token=${t}`;
 };
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+
+export interface ProfileData {
+  id: number;
+  username: string;
+  email: string;
+  avatar_url: string | null;
+  games_played: number;
+  wins: number;
+  win_rate: number;
+  history: Array<{
+    game_type: string;
+    result: 'win' | 'lose';
+    score: number;
+    played_at: string;
+  }>;
+}
+
+export const profile = {
+  get: (): Promise<ProfileData> =>
+    request('/api/profile'),
+
+  updateUsername: (username: string): Promise<ProfileData> =>
+    request('/api/profile', { method: 'PATCH', body: JSON.stringify({ username }) }),
+
+  uploadAvatar: async (file: File): Promise<ProfileData> => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    const t = token.get();
+    const res = await fetch(`${BASE_URL}/api/profile/avatar`, {
+      method: 'POST',
+      headers: t ? { Authorization: `Bearer ${t}` } : {},
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    return data;
+  },
+};

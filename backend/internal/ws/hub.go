@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"time"
 )
 
 type incomingMessage struct {
@@ -367,14 +368,17 @@ func (h *Hub) KickClient(roomUUID string, targetUserID, byUserID uint64) {
 		return // пользователь не онлайн — ничего делать не нужно
 	}
 
-	// Сначала говорим ему что он кикнут
+	// Говорим клиенту что он кикнут
 	target.sendMsg(EventPlayerKicked, KickedPayload{
 		RoomUUID: roomUUID,
 		ByUserID: byUserID,
 	})
 
-	// Потом закрываем его соединение — это вызовет unregister и player_left для остальных
-	target.conn.Close()
+	// Даём время доставить сообщение до закрытия соединения
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		target.conn.Close()
+	}()
 }
 
 // NotifyRoomDeleted — рассылает всем в комнате событие удаления и закрывает соединения.
@@ -392,11 +396,16 @@ func (h *Hub) NotifyRoomDeleted(roomUUID string) {
 	}
 	h.mu.RUnlock()
 
-	// Рассылаем событие всем
+	// Рассылаем событие всем и даём время доставить до закрытия
 	for _, c := range clients {
 		c.sendMsg(EventRoomDeleted, RoomDeletedPayload{RoomUUID: roomUUID})
-		c.conn.Close() // закрываем соединение — unregister произойдёт в readPump
 	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		for _, c := range clients {
+			c.conn.Close()
+		}
+	}()
 }
 
 // NotifyGameSelected — хост выбрал игру, рассылаем всем в комнате

@@ -116,6 +116,15 @@ func (r *Repository) UpdateInviteStatus(ctx context.Context, id uint64, status s
 	return err
 }
 
+// SaveGameResult — сохраняет результат игры одного игрока
+func (r *Repository) SaveGameResult(ctx context.Context, roomID, userID uint64, gameType, result string, score int) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO game_results (room_id, user_id, game_type, result, score) VALUES (?, ?, ?, ?, ?)`,
+		roomID, userID, gameType, result, score,
+	)
+	return err
+}
+
 func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ? WHERE id = ?`, status, roomID)
 	return err

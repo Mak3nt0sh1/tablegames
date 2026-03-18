@@ -8,6 +8,7 @@ import (
 	"tablegames/internal/auth"
 	game "tablegames/internal/game"
 	"tablegames/internal/middleware"
+	"tablegames/internal/profile"
 	"tablegames/internal/room"
 	"tablegames/internal/ws"
 	"tablegames/pkg/db"
@@ -40,6 +41,11 @@ func main() {
 	roomSvc := room.NewService(roomRepo)
 	roomHandler := room.NewHandler(roomSvc, hub)
 
+	// profile
+	profileRepo := profile.NewRepository(database)
+	profileSvc := profile.NewService(profileRepo)
+	profileHandler := profile.NewHandler(profileSvc)
+
 	// game
 	gameMgr := game.NewManager(hub, roomSvc, authSvc)
 	gameHandler := game.NewHandler(gameMgr)
@@ -59,6 +65,9 @@ func main() {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+
+	// Статик сервер для аватаров
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
 
 	// публичные маршруты
 	r.Post("/api/auth/register", authHandler.Register)
@@ -90,6 +99,11 @@ func main() {
 		r.Post("/api/rooms/{uuid}/game/draw", gameHandler.DrawCard)
 		r.Post("/api/rooms/{uuid}/game/uno", gameHandler.SayUno)
 		r.Post("/api/rooms/{uuid}/game/challenge", gameHandler.ChallengeUno)
+
+		// профиль
+		r.Get("/api/profile", profileHandler.GetProfile)
+		r.Patch("/api/profile", profileHandler.UpdateProfile)
+		r.Post("/api/profile/avatar", profileHandler.UploadAvatar)
 
 		// websocket
 		r.Get("/api/rooms/{uuid}/ws", wsHandler.ServeWS)

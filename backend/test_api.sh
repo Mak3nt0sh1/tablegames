@@ -322,7 +322,201 @@ RES=$(curl -s -w "\n%{http_code}" "$BASE/api/rooms/$ROOM_UUID" \
 BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
 check_status "Удалённая комната → 404" "$BODY" "$CODE" 404
 
-# ── 8. WEBSOCKET ─────────────────────────────────────────────────────────────
+
+# ── 8. PROFILE ────────────────────────────────────────────────────────────────
+
+section "PROFILE"
+
+# Получить профиль
+RES=$(curl -s -w "\n%{http_code}" "$BASE/api/profile" \
+  -H "Authorization: Bearer $TOKEN_VASYA")
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Получить профиль" "$BODY" "$CODE" 200
+
+USERNAME=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('username',''))" 2>/dev/null)
+[ -n "$USERNAME" ] && ok "Профиль содержит username: $USERNAME" || fail "Профиль username" "не получен"
+
+GAMES=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('games_played',''))" 2>/dev/null)
+[ "$GAMES" = "0" ] || [ -n "$GAMES" ] && ok "Статистика games_played: $GAMES" || fail "Статистика" "не получена"
+
+# Без токена → 401
+RES=$(curl -s -w "\n%{http_code}" "$BASE/api/profile")
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Профиль без токена → 401" "$BODY" "$CODE" 401
+
+# Обновить username
+NEW_USERNAME="vasya_updated"
+RES=$(curl -s -w "\n%{http_code}" -X PATCH "$BASE/api/profile" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\": \"$NEW_USERNAME\"}")
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Обновить username" "$BODY" "$CODE" 200
+UPDATED=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('username',''))" 2>/dev/null)
+[ "$UPDATED" = "$NEW_USERNAME" ] && ok "Username обновлён: $UPDATED" || fail "Username не обновился" "получено: $UPDATED"
+
+# Занятый username → 409
+RES=$(curl -s -w "\n%{http_code}" -X PATCH "$BASE/api/profile" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "uno_petya"}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Занятый username → 409" "$BODY" "$CODE" 409
+
+# Слишком короткий username → 400
+RES=$(curl -s -w "\n%{http_code}" -X PATCH "$BASE/api/profile" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "ab"}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Короткий username → 400" "$BODY" "$CODE" 400
+
+# Вернём оригинальный username
+curl -s -X PATCH "$BASE/api/profile" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "vasya"}' > /dev/null
+
+# Профиль пети
+RES=$(curl -s -w "\n%{http_code}" "$BASE/api/profile" \
+  -H "Authorization: Bearer $TOKEN_PETYA")
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Профиль petya" "$BODY" "$CODE" 200
+
+# Статистика — проводим быструю игру и проверяем что счётчики обновились
+# Создаём комнату для тест-игры
+STAT_ROOM=$(curl -s -X POST "$BASE/api/rooms" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Stats Test","max_players":2}')
+STAT_UUID=$(echo "$STAT_ROOM" | python3 -c "import sys,json; print(json.load(sys.stdin).get('uuid',''))" 2>/dev/null)
+STAT_CODE=$(echo "$STAT_ROOM" | python3 -c "import sys,json; print(json.load(sys.stdin).get('invite_code',''))" 2>/dev/null)
+
+# Петя заходит
+curl -s -X POST "$BASE/api/join/code/$STAT_CODE" \
+  -H "Authorization: Bearer $TOKEN_PETYA" \
+  -H "Content-Type: application/json" -d '{}' > /dev/null
+
+# Стартуем игру
+curl -s -X POST "$BASE/api/rooms/$STAT_UUID/game/start" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"game_type":"uno"}' > /dev/null
+
+# Логин для получения ID
+# Берём ID из JWT токенов
+VASYA_ID=$(echo "$TOKEN_VASYA" | cut -d'.' -f2 | python3 -c "
+import sys, base64, json
+raw = sys.stdin.read().strip()
+pad = raw + '=' * (4 - len(raw) % 4)
+print(json.loads(base64.b64decode(pad)).get('sub',''))
+" 2>/dev/null)
+PETYA_ID=$(echo "$TOKEN_PETYA" | cut -d'.' -f2 | python3 -c "
+import sys, base64, json
+raw = sys.stdin.read().strip()
+pad = raw + '=' * (4 - len(raw) % 4)
+print(json.loads(base64.b64decode(pad)).get('sub',''))
+" 2>/dev/null)
+
+# Доигрываем до победителя (до 200 ходов)
+WINNER_ID=""
+for i in $(seq 1 200); do
+  STATE=$(curl -s "$BASE/api/rooms/$STAT_UUID/game/state" -H "Authorization: Bearer $TOKEN_VASYA")
+  PHASE=$(echo "$STATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('phase',''))" 2>/dev/null)
+  WINNER_ID=$(echo "$STATE" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+w=d.get('winner')
+print(w if w is not None else '')
+" 2>/dev/null)
+  [ "$PHASE" = "finished" ] && break
+
+  CURRENT=$(echo "$STATE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('current_turn',''))" 2>/dev/null)
+  if [ "$CURRENT" = "$VASYA_ID" ]; then
+    ACT_TOKEN=$TOKEN_VASYA; ACT_STATE=$(curl -s "$BASE/api/rooms/$STAT_UUID/game/state" -H "Authorization: Bearer $TOKEN_VASYA")
+  else
+    ACT_TOKEN=$TOKEN_PETYA; ACT_STATE=$(curl -s "$BASE/api/rooms/$STAT_UUID/game/state" -H "Authorization: Bearer $TOKEN_PETYA")
+  fi
+
+  CARD_ID=$(echo "$ACT_STATE" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+top_color=d.get('current_color',''); top_value=d.get('top_card',{}).get('value','')
+for c in d.get('your_hand',[]):
+    if c['color']==top_color or c['value']==top_value:
+        print(c['id']); break
+" 2>/dev/null)
+
+  if [ -n "$CARD_ID" ]; then
+    PLAY_RES=$(curl -s -X POST "$BASE/api/rooms/$STAT_UUID/game/play" \
+      -H "Authorization: Bearer $ACT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"card_id\": $CARD_ID}")
+    if echo "$PLAY_RES" | python3 -c "import sys,json; exit(0 if 'error' not in json.load(sys.stdin) else 1)" 2>/dev/null; then
+      # Проверяем победу сразу после хода
+      CHECK=$(curl -s "$BASE/api/rooms/$STAT_UUID/game/state" -H "Authorization: Bearer $ACT_TOKEN")
+      CHECK_PHASE=$(echo "$CHECK" | python3 -c "import sys,json; print(json.load(sys.stdin).get('phase',''))" 2>/dev/null)
+      CHECK_WIN=$(echo "$CHECK" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+w=d.get('winner')
+print(w if w is not None else 'none')
+" 2>/dev/null)
+      if [ "$CHECK_PHASE" = "finished" ] || [ -n "$CHECK_WIN" -a "$CHECK_WIN" != "none" ]; then
+        WINNER_ID=$CHECK_WIN
+        break
+      fi
+      # Резервная проверка по card_count=0
+      ZERO=$(echo "$CHECK" | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+for p in d.get('players',[]):
+    if p.get('card_count',99)==0: print(p['user_id'])
+" 2>/dev/null)
+      if [ -n "$ZERO" ]; then
+        WINNER_ID=$ZERO
+        break
+      fi
+    else
+      curl -s -X POST "$BASE/api/rooms/$STAT_UUID/game/draw" -H "Authorization: Bearer $ACT_TOKEN" > /dev/null
+    fi
+  else
+    curl -s -X POST "$BASE/api/rooms/$STAT_UUID/game/draw" -H "Authorization: Bearer $ACT_TOKEN" > /dev/null
+  fi
+  sleep 0.05
+done
+
+if [ -n "$WINNER_ID" ]; then
+  ok "Тестовая игра завершена (победитель ID=$WINNER_ID)"
+
+  # Проверяем статистику победителя
+  if [ "$WINNER_ID" = "$VASYA_ID" ]; then
+    WIN_TOKEN=$TOKEN_VASYA; LOSE_TOKEN=$TOKEN_PETYA
+  else
+    WIN_TOKEN=$TOKEN_PETYA; LOSE_TOKEN=$TOKEN_VASYA
+  fi
+
+  sleep 0.5 # даём серверу время записать результаты
+
+  WIN_PROFILE=$(curl -s "$BASE/api/profile" -H "Authorization: Bearer $WIN_TOKEN")
+  WIN_GAMES=$(echo "$WIN_PROFILE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('games_played',0))" 2>/dev/null)
+  WIN_WINS=$(echo "$WIN_PROFILE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('wins',0))" 2>/dev/null)
+  [ "$WIN_GAMES" -ge 1 ] && ok "Победитель: games_played=$WIN_GAMES" || fail "games_played победителя" "ожидалось >= 1, получено $WIN_GAMES"
+  [ "$WIN_WINS" -ge 1 ] && ok "Победитель: wins=$WIN_WINS" || fail "wins победителя" "ожидалось >= 1, получено $WIN_WINS"
+
+  LOSE_PROFILE=$(curl -s "$BASE/api/profile" -H "Authorization: Bearer $LOSE_TOKEN")
+  LOSE_GAMES=$(echo "$LOSE_PROFILE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('games_played',0))" 2>/dev/null)
+  LOSE_WINS=$(echo "$LOSE_PROFILE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('wins',0))" 2>/dev/null)
+  [ "$LOSE_GAMES" -ge 1 ] && ok "Проигравший: games_played=$LOSE_GAMES" || fail "games_played проигравшего" "ожидалось >= 1, получено $LOSE_GAMES"
+  [ "$LOSE_WINS" -eq 0 ] && ok "Проигравший: wins=0" || fail "wins проигравшего" "ожидалось 0, получено $LOSE_WINS"
+
+  # История игр
+  WIN_HISTORY=$(echo "$WIN_PROFILE" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('history',[])))" 2>/dev/null)
+  [ "$WIN_HISTORY" -ge 1 ] && ok "История игр записана ($WIN_HISTORY записей)" || fail "История игр" "пустая"
+
+  # Удаляем тестовую комнату
+  curl -s -X DELETE "$BASE/api/rooms/$STAT_UUID" -H "Authorization: Bearer $TOKEN_VASYA" > /dev/null
+else
+  fail "Статистика" "тестовая игра не завершилась за 200 ходов"
+fi
+
+# ── 9. WEBSOCKET ─────────────────────────────────────────────────────────────
 
 section "WEBSOCKET"
 

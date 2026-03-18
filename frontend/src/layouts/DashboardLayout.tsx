@@ -1,10 +1,16 @@
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Gamepad2, User, Settings as SettingsIcon, LogOut } from "lucide-react";
 import { auth } from "../api/client";
 
 export default function DashboardLayout() {
-  const location = useLocation(); // Хук для определения текущей страницы
+  const location = useLocation();
+  const navigate = useNavigate();
   const currentUser = auth.me();
+
+  const handleLogout = () => {
+    auth.logout();
+    navigate('/login');
+  };
 
   const navItems = [
     { path: "/", label: "Игровое Лобби", icon: <Gamepad2 size={20} /> },
@@ -22,7 +28,7 @@ export default function DashboardLayout() {
         
         <nav className="flex-1 px-4 space-y-1 mt-4">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path; // Проверяем, активна ли ссылка
+            const isActive = location.pathname === item.path;
             return (
               <Link 
                 key={item.path} 
@@ -39,7 +45,10 @@ export default function DashboardLayout() {
         </nav>
 
         <div className="p-4 border-t border-gray-800">
-          <button className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-all">
+          <button 
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-all"
+          >
             <LogOut size={20} />
             <span className="font-medium">Выйти</span>
           </button>
@@ -49,7 +58,7 @@ export default function DashboardLayout() {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-16 bg-gray-900/50 backdrop-blur-sm border-b border-gray-800 flex items-center justify-between px-8 z-10">
           <h2 className="text-lg font-semibold text-gray-200">
-             {navItems.find(i => i.path === location.pathname)?.label || "Настольные игры"}
+            {navItems.find(i => i.path === location.pathname)?.label || "Настольные игры"}
           </h2>
           <div className="flex items-center gap-3 cursor-pointer hover:bg-gray-800 p-2 rounded-lg transition-colors">
             <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-full"></div>
@@ -58,7 +67,7 @@ export default function DashboardLayout() {
         </header>
 
         <main className="flex-1 p-8 overflow-y-auto">
-          <Outlet /> {/* Сюда будут подгружаться страницы Lobby, Profile, Settings */}
+          <Outlet />
         </main>
       </div>
     </div>

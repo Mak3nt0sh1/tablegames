@@ -7,6 +7,7 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Room from './pages/Room';
+import JoinRoom from './pages/JoinRoom';
 import { token } from './api/client';
 
 // Защищённый роут — редиректит на /login если нет токена
@@ -22,6 +23,9 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
         </Route>
+
+        {/* Публичный роут для инвайт-ссылок */}
+        <Route path="/join/:code" element={<JoinRoom />} />
 
         <Route
           path="/"
