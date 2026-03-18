@@ -398,3 +398,11 @@ func (h *Hub) NotifyRoomDeleted(roomUUID string) {
 		c.conn.Close() // закрываем соединение — unregister произойдёт в readPump
 	}
 }
+
+// NotifyGameSelected — хост выбрал игру, рассылаем всем в комнате
+func (h *Hub) NotifyGameSelected(roomUUID string, gameType string) {
+	h.broadcastToRoom(roomUUID, "game_selected", map[string]any{
+		"room_uuid":  roomUUID,
+		"game_type":  gameType,
+	})
+}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"tablegames/internal/auth"
+	game "tablegames/internal/game"
 	"tablegames/internal/middleware"
 	"tablegames/internal/room"
 	"tablegames/internal/ws"
@@ -38,6 +39,10 @@ func main() {
 	roomSvc := room.NewService(roomRepo)
 	roomHandler := room.NewHandler(roomSvc, hub)
 
+	// game
+	gameMgr := game.NewManager(hub, roomSvc, authSvc)
+	gameHandler := game.NewHandler(gameMgr)
+
 	// websocket handler
 	wsHandler := ws.NewHandler(hub, roomSvc)
 
@@ -67,6 +72,14 @@ func main() {
 		r.Post("/api/rooms/{uuid}/invite", roomHandler.CreateInviteLink)
 		r.Post("/api/join/code/{code}", roomHandler.JoinByCode)
 		r.Post("/api/join/token/{token}", roomHandler.JoinByToken)
+
+		// игра
+		r.Post("/api/rooms/{uuid}/game/start", gameHandler.StartGame)
+		r.Get("/api/rooms/{uuid}/game/state", gameHandler.GetGameState)
+		r.Post("/api/rooms/{uuid}/game/play", gameHandler.PlayCard)
+		r.Post("/api/rooms/{uuid}/game/draw", gameHandler.DrawCard)
+		r.Post("/api/rooms/{uuid}/game/uno", gameHandler.SayUno)
+		r.Post("/api/rooms/{uuid}/game/challenge", gameHandler.ChallengeUno)
 
 		// websocket
 		r.Get("/api/rooms/{uuid}/ws", wsHandler.ServeWS)

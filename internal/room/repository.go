@@ -32,8 +32,8 @@ func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) error {
 
 func (r *Repository) UpdateRoom(ctx context.Context, room *models.Room) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE rooms SET name = ?, max_players = ?, password_hash = ? WHERE id = ?`,
-		room.Name, room.MaxPlayers, room.PasswordHash, room.ID,
+		`UPDATE rooms SET name = ?, max_players = ?, password_hash = ?, game_type = ? WHERE id = ?`,
+		room.Name, room.MaxPlayers, room.PasswordHash, room.GameType, room.ID,
 	)
 	return err
 }
