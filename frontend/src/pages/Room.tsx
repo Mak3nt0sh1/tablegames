@@ -9,7 +9,7 @@ import { getSettings } from '../hooks/useSettings';
 import VoiceChat from '../components/VoiceChat';
 import { useWebSocket } from '../hooks/useWebSocket';
 import type { Room as RoomType } from '../types';
-import type { RoomStatePayload, ChatPayload } from '../types';
+import type { RoomStatePayload, ChatPayload} from '../types';
 
 interface Player {
   user_id: number;
@@ -322,10 +322,32 @@ export default function Room() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">Игроков</label>
-            <div className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-gray-300">
-              {players.length} / {room.max_players}
-            </div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Максимум игроков</label>
+            {isHost ? (
+              <select
+                value={room.max_players}
+                onChange={async (e) => {
+                  const val = parseInt(e.target.value);
+                  try {
+                    const updated = await rooms.update(roomId!, { max_players: val });
+                    setRoom(updated);
+                  } catch (err: unknown) {
+                    setError(err instanceof Error ? err.message : 'Ошибка');
+                  }
+                }}
+                className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+              >
+                {Array.from({ length: 9 }, (_, i) => i + 2).map((n) => (
+                  <option key={n} value={n} disabled={n < players.length}>
+                    {n} {n < players.length ? '(меньше текущих)' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-gray-300">
+                {players.length} / {room.max_players}
+              </div>
+            )}
           </div>
         </div>
 
