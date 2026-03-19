@@ -35,4 +35,4 @@ npm run dev
 
 ## Игры
 
-- ✅ UNO
+- UNO
