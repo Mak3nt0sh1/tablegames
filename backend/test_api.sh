@@ -295,6 +295,26 @@ RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$GS_UUID/game/start" 
 BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
 check_status "Повторный старт → 400" "$BODY" "$CODE" 400
 
+
+# Тест перезапуска игры
+# Доигрываем быстро до конца или делаем reset вручную
+RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$GS_UUID/game/reset" \
+  -H "Authorization: Bearer $TOKEN_VASYA")
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Reset игры" "$BODY" "$CODE" 200
+
+# После reset можно запустить новую игру
+RES=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/rooms/$GS_UUID/game/start" \
+  -H "Authorization: Bearer $TOKEN_VASYA" \
+  -H "Content-Type: application/json" \
+  -d '{"game_type":"uno"}')
+BODY=$(echo "$RES" | head -n1); CODE=$(echo "$RES" | tail -n1)
+check_status "Перезапуск игры после reset" "$BODY" "$CODE" 200
+
+# Reset снова перед удалением комнаты
+curl -s -X POST "$BASE/api/rooms/$GS_UUID/game/reset" \
+  -H "Authorization: Bearer $TOKEN_VASYA" > /dev/null
+
 # Удаляем тестовую комнату
 curl -s -X DELETE "$BASE/api/rooms/$GS_UUID" \
   -H "Authorization: Bearer $TOKEN_VASYA" > /dev/null

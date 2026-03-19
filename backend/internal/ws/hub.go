@@ -415,3 +415,8 @@ func (h *Hub) NotifyGameSelected(roomUUID string, gameType string) {
 		"game_type": gameType,
 	})
 }
+
+// SendToUser — отправляет сообщение конкретному пользователю в комнате
+func (h *Hub) SendToUser(roomUUID string, userID uint64, msgType string, payload any) {
+	h.relayToUser(roomUUID, userID, msgType, payload)
+}

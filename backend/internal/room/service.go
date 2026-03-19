@@ -87,7 +87,7 @@ func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64
 	if room.HostID != hostID {
 		return nil, ErrForbidden
 	}
-	if room.Status != "waiting" {
+	if room.Status == "playing" {
 		return nil, ErrRoomNotAvail
 	}
 	if maxPlayers > 0 {
@@ -227,7 +227,7 @@ func (s *Service) CreateInviteLink(ctx context.Context, roomUUID string, hostID 
 }
 
 func (s *Service) joinRoom(ctx context.Context, userID uint64, room *models.Room) (*models.Room, error) {
-	if room.Status != "waiting" {
+	if room.Status == "playing" {
 		return nil, ErrRoomNotAvail
 	}
 	count, _ := s.repo.CountMembers(ctx, room.ID)

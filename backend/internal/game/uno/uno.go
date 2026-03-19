@@ -156,8 +156,10 @@ func (g *Game) applyCardEffect(card Card) {
 }
 
 // DrawCard — игрок берёт карту(ы) из колоды
-// Если висит DrawPending — берёт штрафные карты и ход переходит
-// Если DrawPending == 0 — берёт 1 карту и ход переходит
+// Если висит DrawPending — берёт штрафные карты и ход всегда переходит
+// Если DrawPending == 0 — берёт 1 карту:
+//   - если она подходит для сброса — игрок может её сыграть (ход НЕ переходит)
+//   - если не подходит — ход переходит
 func (g *Game) DrawCard(userID uint64) ([]Card, error) {
 	s := g.State
 	if s.Phase != PhasePlaying {
@@ -169,16 +171,28 @@ func (g *Game) DrawCard(userID uint64) ([]Card, error) {
 
 	player := s.playerByID(userID)
 
-	count := 1
 	if s.DrawPending > 0 {
-		count = s.DrawPending
+		// Штрафные карты — берём все и переходим ход
+		count := s.DrawPending
 		s.DrawPending = 0
+		drawn := g.dealCards(player, count)
+		player.SaidUno = false
+		s.AdvanceTurn()
+		return drawn, nil
 	}
 
-	drawn := g.dealCards(player, count)
+	// Обычное взятие — 1 карта
+	drawn := g.dealCards(player, 1)
 	player.SaidUno = false
-	s.AdvanceTurn()
 
+	// Если взятая карта подходит — оставляем ход у игрока
+	if len(drawn) > 0 && g.canPlay(drawn[0]) {
+		// Ход не переходит — игрок может сыграть карту
+		return drawn, nil
+	}
+
+	// Карта не подходит — переходим ход
+	s.AdvanceTurn()
 	return drawn, nil
 }
 
@@ -263,4 +277,14 @@ func (g *Game) Scores() map[uint64]int {
 		scores[p.UserID] = total
 	}
 	return scores
+}
+
+// DealCardsToPlayer — публичный метод для выдачи карт игроку из manager
+func (g *Game) DealCardsToPlayer(player *PlayerState, n int) []Card {
+	return g.dealCards(player, n)
+}
+
+// PlayerByID — публичный доступ к игроку по ID
+func (g *Game) PlayerByID(userID uint64) *PlayerState {
+	return g.State.playerByID(userID)
 }

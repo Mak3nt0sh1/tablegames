@@ -136,6 +136,9 @@ export const game = {
   sayUno: (uuid: string): Promise<void> =>
     request(`/api/rooms/${uuid}/game/uno`, { method: 'POST' }),
 
+  reset: (uuid: string): Promise<void> =>
+    request(`/api/rooms/\${uuid}/game/reset`, { method: 'POST' }),
+
   challengeUno: (uuid: string, targetUserId: number): Promise<void> =>
     request(`/api/rooms/${uuid}/game/challenge`, {
       method: 'POST',

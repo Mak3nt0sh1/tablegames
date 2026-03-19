@@ -8,7 +8,9 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Room from './pages/Room';
 import JoinRoom from './pages/JoinRoom';
+import UnoGame from './pages/UnoGame';
 import { token } from './api/client';
+import { VoiceProvider } from './context/VoiceContext';
 
 // Защищённый роут — редиректит на /login если нет токена
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -17,6 +19,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
+    <VoiceProvider>
     <BrowserRouter>
       <Routes>
         <Route element={<AuthLayout />}>
@@ -26,6 +29,9 @@ export default function App() {
 
         {/* Публичный роут для инвайт-ссылок */}
         <Route path="/join/:code" element={<JoinRoom />} />
+
+        {/* Игра UNO — fullscreen без layout */}
+        <Route path="/:roomId/game" element={<UnoGame />} />
 
         <Route
           path="/"
@@ -42,5 +48,6 @@ export default function App() {
         </Route>
       </Routes>
     </BrowserRouter>
+    </VoiceProvider>
   );
 }

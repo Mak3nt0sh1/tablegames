@@ -129,3 +129,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
+
+// ResetGame — POST /api/rooms/{uuid}/game/reset
+// Сбрасывает состояние игры — вызывается когда все вышли из игры обратно в комнату
+func (h *Handler) ResetGame(w http.ResponseWriter, r *http.Request) {
+	uuid := chi.URLParam(r, "uuid")
+	h.mgr.ResetGame(uuid)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
+}

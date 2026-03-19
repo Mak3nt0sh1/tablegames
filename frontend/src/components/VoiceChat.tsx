@@ -34,6 +34,7 @@ export default forwardRef(function VoiceChat({
   incomingIce,
 }: VoiceChatProps, ref: React.Ref<{ handleJoin: () => void }>) {
   const [isInVoice, setIsInVoice] = useState(false);
+  const isInVoiceRef = useRef(false);
 
   // Exposing handleJoin для авто-войса из Room
   useImperativeHandle(ref, () => ({ handleJoin }));
@@ -116,6 +117,7 @@ export default forwardRef(function VoiceChat({
     audioRefs.current.forEach((a) => { a.srcObject = null; });
     audioRefs.current.clear();
     setIsInVoice(false);
+    isInVoiceRef.current = false;
     onLeave();
   };
 
@@ -160,7 +162,7 @@ export default forwardRef(function VoiceChat({
 
   // Чистим при размонтировании
   useEffect(() => {
-    return () => { if (isInVoice) handleLeave(); };
+    return () => { if (isInVoiceRef.current) handleLeave(); };
   }, []);
 
   const othersInVoice = voiceUsers.filter((u) => u.user_id !== currentUserId);

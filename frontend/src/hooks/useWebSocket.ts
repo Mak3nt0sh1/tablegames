@@ -41,6 +41,7 @@ export interface WsHandlers {
   onVoiceOffer?: (payload: { from_user_id: number; target_user_id: number; sdp: string }) => void;
   onVoiceAnswer?: (payload: { from_user_id: number; target_user_id: number; sdp: string }) => void;
   onVoiceIceCandidate?: (payload: { from_user_id: number; target_user_id: number; candidate: string; sdp_mid: string; sdp_mline_index: number }) => void;
+  onDrawTwoApplied?: (payload: { user_id: number; count: number }) => void;
   onOpen?: () => void;
   onClose?: () => void;
   onError?: (e: Event) => void;
@@ -108,6 +109,7 @@ export function useWebSocket(roomUUID: string | null, handlers: WsHandlers) {
         case 'voice_offer':       h.onVoiceOffer?.(msg.payload as any); break;
         case 'voice_answer':      h.onVoiceAnswer?.(msg.payload as any); break;
         case 'voice_ice_candidate': h.onVoiceIceCandidate?.(msg.payload as any); break;
+        case 'draw_two_applied':    h.onDrawTwoApplied?.(msg.payload as any); break;
         default:
           console.log('[WS] unknown event:', msg.type, msg.payload);
       }

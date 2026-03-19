@@ -19,6 +19,7 @@ var (
 // Hub — то что нужно от ws.Hub
 type Hub interface {
 	BroadcastToRoom(roomUUID string, msgType string, payload any)
+	SendToUser(roomUUID string, userID uint64, msgType string, payload any)
 }
 
 // RoomService — то что нужно от room.Service
@@ -73,6 +74,8 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 	if _, exists := m.games[roomUUID]; exists {
 		return ErrGameAlreadyRunning
 	}
+	// Чистим завершённую игру — позволяем запустить новую
+	delete(m.finishedGames, roomUUID)
 
 	// Получаем комнату и проверяем что запрашивает хост
 	room, err := m.roomSvc.GetRoom(ctx, roomUUID)
@@ -111,6 +114,9 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 		players[i].Username = usernames[mb.UserID]
 	}
 
+	// Сбрасываем статус на waiting → playing
+	_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "waiting")
+
 	// Запускаем игру
 	g := uno.NewGame(roomUUID, players)
 	m.games[roomUUID] = &gameInfo{game: g, roomID: room.ID, gameType: gameType}
@@ -130,9 +136,9 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 		"direction":     game.State.Direction,
 	})
 
-	// Каждому игроку отдельно рассылаем его руку
+	// Каждому игроку отправляем только его руку
 	for _, p := range game.State.Players {
-		m.hub.BroadcastToRoom(roomUUID, "your_hand", map[string]any{
+		m.hub.SendToUser(roomUUID, p.UserID, "your_hand", map[string]any{
 			"user_id": p.UserID,
 			"hand":    p.Hand,
 		})
@@ -174,6 +180,39 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 		delete(m.games, roomUUID)
 		_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "finished")
 		return nil
+	}
+
+	// Если висит штраф и у следующего игрока нет +2 для ответа — даём карты автоматически
+	if s.DrawPending > 0 {
+		nextID := s.CurrentPlayerID()
+		nextPlayer := game.PlayerByID(nextID)
+		hasDrawTwo := false
+		if nextPlayer != nil {
+			for _, c := range nextPlayer.Hand {
+				if c.Value == uno.DrawTwo {
+					hasDrawTwo = true
+					break
+				}
+			}
+		}
+		if !hasDrawTwo && nextPlayer != nil {
+			// Берём карты напрямую без AdvanceTurn (он уже случился в applyCardEffect)
+			count := s.DrawPending
+			s.DrawPending = 0
+			drawn := game.DealCardsToPlayer(nextPlayer, count)
+			s.AdvanceTurn() // переходим ход после штрафа
+			m.hub.SendToUser(roomUUID, nextID, "your_drawn_cards", map[string]any{
+				"user_id": nextID,
+				"cards":   drawn,
+			})
+			m.broadcastGameState(roomUUID, game, "card_played", map[string]any{
+				"user_id":       userID,
+				"card":          s.TopCard,
+				"current_color": s.CurrentColor,
+				"draw_applied":  map[string]any{"user_id": nextID, "count": count},
+			})
+			return nil
+		}
 	}
 
 	// Рассылаем обновление состояния
@@ -341,4 +380,20 @@ func (m *Manager) getGameInfo(roomUUID string) (*gameInfo, error) {
 		return nil, ErrNoGameRunning
 	}
 	return info, nil
+}
+
+// ResetGame — сбрасывает состояние игры для комнаты (вызывается при возврате в лобби)
+func (m *Manager) ResetGame(roomUUID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.games, roomUUID)
+	delete(m.finishedGames, roomUUID)
+}
+
+// IsGameRunning — проверяет идёт ли игра прямо сейчас
+func (m *Manager) IsGameRunning(roomUUID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.games[roomUUID]
+	return ok
 }

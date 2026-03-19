@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Copy, Check, UserPlus, Play, Settings, LogOut, Crown } from 'lucide-react';
 import { rooms, game, auth } from '../api/client';
 import Chat from '../components/Chat';
 import { useSound } from '../hooks/useSound';
 import { useNotifications } from '../hooks/useNotifications';
 import { getSettings } from '../hooks/useSettings';
-import VoiceChat from '../components/VoiceChat';
+import VoiceMini from '../components/VoiceMini';
+import { useVoice } from '../context/VoiceContext';
 import { useWebSocket } from '../hooks/useWebSocket';
 import type { Room as RoomType } from '../types';
 import type { RoomStatePayload, ChatPayload} from '../types';
@@ -22,6 +23,7 @@ export default function Room() {
   const navigate = useNavigate();
 
   const me = auth.me();
+  const location = useLocation();
   const [room, setRoom] = useState<RoomType | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [isCopied, setIsCopied] = useState(false);
@@ -35,10 +37,7 @@ export default function Room() {
   const msgIdRef = useRef(0);
 
   // Голосовой чат
-  const [voiceUsers, setVoiceUsers] = useState<Array<{ user_id: number; username: string }>>([]);
-  const [incomingOffer, setIncomingOffer] = useState<{ from_user_id: number; sdp: string } | null>(null);
-  const [incomingAnswer, setIncomingAnswer] = useState<{ from_user_id: number; sdp: string } | null>(null);
-  const [incomingIce, setIncomingIce] = useState<{ from_user_id: number; candidate: string; sdp_mid: string; sdp_mline_index: number } | null>(null);
+
 
   const isHost = room?.host_id === me?.id;
   const { play } = useSound();
@@ -49,12 +48,11 @@ export default function Room() {
     if (!roomId) return;
     const init = async () => {
       try {
-        // Сначала пробуем получить комнату
         let r = await rooms.get(roomId);
-        // Если не являемся членом — вступаем по UUID как коду (через invite ссылку)
-        // WS подключение само проверит членство и вернёт 403 если нет
         setRoom(r);
         setSelectedGame(r.game_type || '');
+
+
       } catch {
         navigate('/');
       } finally {
@@ -62,7 +60,7 @@ export default function Room() {
       }
     };
     init();
-  }, [roomId]);
+  }, [roomId, location.key]);
 
   // Авто-вход в войс если включено в настройках
   const voiceChatRef = useRef<{ handleJoin: () => void } | null>(null);
@@ -73,7 +71,23 @@ export default function Room() {
     }
   }, [loading]);
 
+  // Обновляем статус комнаты при возврате на страницу (после выхода из игры)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (roomId) {
+        rooms.get(roomId).then((r) => {
+          setRoom(r);
+          setSelectedGame(r.game_type || '');
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [roomId]);
+
   // WebSocket — реалтайм обновления
+  const { setVoiceUsers, handleOffer, handleAnswer, handleIce, initPeer, leave: leaveVoice } = useVoice();
+
   const { sendChat, sendVoiceJoin, sendVoiceLeave, sendVoiceOffer, sendVoiceAnswer, sendVoiceIce } = useWebSocket(roomId ?? null, {
     onRoomState: (payload: RoomStatePayload) => {
       setPlayers(payload.players);
@@ -94,13 +108,23 @@ export default function Room() {
       setSelectedGame(payload.game_type);
     },
     onGameStarted: () => {
+      setRoom((prev) => prev ? { ...prev, status: 'playing' } : prev);
       navigate(`/${roomId}/game`);
     },
+    onGameOver: () => {
+      setRoom((prev) => prev ? { ...prev, status: 'finished' } : prev);
+    },
+    onGameStateUpdate: (payload) => {
+      if (payload.phase === 'finished') {
+        setRoom((prev) => prev ? { ...prev, status: 'finished' } : prev);
+      }
+    },
     onPlayerKicked: () => {
-      // Это событие приходит только кикнутому игроку — просто редиректим
+      leaveVoice();
       navigate('/');
     },
     onRoomDeleted: () => {
+      leaveVoice();
       navigate('/');
     },
     onChatBroadcast: (payload) => {
@@ -111,17 +135,16 @@ export default function Room() {
       }
     },
     onVoiceUserJoined: (payload) => {
-      setVoiceUsers((prev) => {
-        if (prev.find((u) => u.user_id === payload.user_id)) return prev;
-        return [...prev, payload];
-      });
+      const user = { user_id: payload.user_id, username: payload.username };
+      setVoiceUsers((prev) => prev.find((u) => u.user_id === user.user_id) ? prev : [...prev, user]);
+      initPeer(payload.user_id, sendVoiceOffer, sendVoiceIce).catch(console.error);
     },
     onVoiceUserLeft: (payload) => {
       setVoiceUsers((prev) => prev.filter((u) => u.user_id !== payload.user_id));
     },
-    onVoiceOffer: (payload) => setIncomingOffer(payload as any),
-    onVoiceAnswer: (payload) => setIncomingAnswer(payload as any),
-    onVoiceIceCandidate: (payload) => setIncomingIce(payload as any),
+    onVoiceOffer: (payload: any) => handleOffer(payload.from_user_id, payload.sdp, sendVoiceAnswer, sendVoiceIce),
+    onVoiceAnswer: (payload: any) => handleAnswer(payload.from_user_id, payload.sdp),
+    onVoiceIceCandidate: (payload: any) => handleIce(payload.from_user_id, payload.candidate, payload.sdp_mid, payload.sdp_mline_index),
   });
 
   const inviteLink = `${window.location.origin}/join/${room?.invite_code ?? ''}`;
@@ -162,9 +185,11 @@ export default function Room() {
     try {
       if (isHost) {
         await rooms.delete(roomId);
+        leaveVoice();
         navigate('/');
       } else {
         await rooms.leave(roomId);
+        leaveVoice();
         navigate('/');
       }
     } catch (e: unknown) {
@@ -352,22 +377,50 @@ export default function Room() {
         </div>
 
         {/* Голосовой чат */}
-        <VoiceChat
-          ref={voiceChatRef}
-          currentUserId={me?.id ?? 0}
-          voiceUsers={voiceUsers}
-          onJoin={sendVoiceJoin}
-          onLeave={sendVoiceLeave}
+        <VoiceMini
+          onJoinWs={sendVoiceJoin}
+          onLeaveWs={sendVoiceLeave}
           onOffer={sendVoiceOffer}
           onAnswer={sendVoiceAnswer}
           onIce={sendVoiceIce}
-          incomingOffer={incomingOffer}
-          incomingAnswer={incomingAnswer}
-          incomingIce={incomingIce}
         />
 
         <div className="space-y-3 mt-6">
-          {isHost && (
+          {/* Игра идёт — кнопка вернуться */}
+          {room?.status === 'playing' && (
+            <button
+              onClick={() => navigate(`/${roomId}/game`)}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2"
+            >
+              <Play size={20} />
+              Вернуться в игру
+            </button>
+          )}
+
+          {/* Игра завершена — кнопка новой игры (только хост) */}
+          {room?.status === 'finished' && isHost && (
+            <button
+              onClick={async () => {
+                if (!roomId || !selectedGame) return;
+                setStarting(true);
+                try {
+                  await game.reset(roomId);
+                  await game.start(roomId, selectedGame);
+                } catch (e: unknown) {
+                  setError(e instanceof Error ? e.message : 'Ошибка');
+                  setStarting(false);
+                }
+              }}
+              disabled={!selectedGame || starting || players.length < 2}
+              className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2"
+            >
+              <Play size={20} />
+              {starting ? 'Запускаем...' : players.length < 2 ? 'Нужно 2+ игроков' : 'Новая игра'}
+            </button>
+          )}
+
+          {/* Ожидание — кнопка старта (только хост) */}
+          {room?.status === 'waiting' && isHost && (
             <button
               onClick={handleStartGame}
               disabled={!selectedGame || starting || players.length < 2}
