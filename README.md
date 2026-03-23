@@ -72,7 +72,7 @@ cd tablegames
 
 ### 7. Создание .env файла
 
-Создайте файл `.env` в **корне проекта** (рядом с папками `backend/` и `frontend/`):
+Создайте файл `.env` в **папке backend:
 
 ```bash
 cat > .env << 'EOF'
