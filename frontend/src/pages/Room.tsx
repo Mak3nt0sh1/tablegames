@@ -52,6 +52,24 @@ export default function Room() {
         setRoom(r);
         setSelectedGame(r.game_type || '');
 
+        // Если комната в статусе playing — проверяем реальный статус игры в менеджере
+        if (r.status === 'playing') {
+          try {
+            const gameStatus = await game.status(roomId);
+            if (gameStatus.status === 'finished' || gameStatus.status === 'none') {
+              // Игра завершилась или не существует — сбрасываем
+              await game.reset(roomId);
+              setRoom((prev) => prev ? { ...prev, status: 'waiting' } : prev);
+            }
+          } catch {
+            // Если /game/status недоступен — оставляем как есть
+          }
+        }
+        if (r.status === 'finished') {
+          // Уже finished — просто показываем кнопку "Новая игра"
+          // ничего дополнительно делать не нужно
+        }
+
 
       } catch {
         navigate('/');
@@ -108,11 +126,16 @@ export default function Room() {
       setSelectedGame(payload.game_type);
     },
     onGameStarted: () => {
-      setRoom((prev) => prev ? { ...prev, status: 'playing' } : prev);
       navigate(`/${roomId}/game`);
     },
     onGameOver: () => {
       setRoom((prev) => prev ? { ...prev, status: 'finished' } : prev);
+    },
+    onGameReset: () => {
+      setRoom((prev) => prev ? { ...prev, status: 'waiting' } : prev);
+    },
+    onGameForceEnded: () => {
+      setRoom((prev) => prev ? { ...prev, status: 'waiting' } : prev);
     },
     onGameStateUpdate: (payload) => {
       if (payload.phase === 'finished') {
@@ -380,13 +403,21 @@ export default function Room() {
         <VoiceMini
           onJoinWs={sendVoiceJoin}
           onLeaveWs={sendVoiceLeave}
-          onOffer={sendVoiceOffer}
-          onAnswer={sendVoiceAnswer}
-          onIce={sendVoiceIce}
         />
 
         <div className="space-y-3 mt-6">
-          {/* Игра идёт — кнопка вернуться */}
+          {/* Игра идёт — кнопки вернуться и завершить */}
+          {room?.status === 'playing' && isHost && (
+            <button
+              onClick={async () => {
+                if (!roomId) return;
+                try { await game.forceEnd(roomId); } catch {}
+              }}
+              className="w-full bg-red-600/80 hover:bg-red-500 text-white font-bold rounded-xl px-4 py-3 transition-colors flex items-center justify-center gap-2"
+            >
+              ✕ Завершить игру
+            </button>
+          )}
           {room?.status === 'playing' && (
             <button
               onClick={() => navigate(`/${roomId}/game`)}

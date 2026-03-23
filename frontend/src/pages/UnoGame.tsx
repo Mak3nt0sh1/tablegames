@@ -68,6 +68,7 @@ export default function UnoGame() {
         direction: payload.direction,
         draw_pending: payload.draw_pending,
         players: payload.players,
+        player_order: payload.player_order ?? prev.player_order,
         draw_pile_size: payload.draw_pile_size,
       } : prev);
 
@@ -102,6 +103,28 @@ export default function UnoGame() {
       play('uno_called');
     },
 
+
+    onPlayerRemoved: (payload: any) => {
+      if (payload.user_id === me?.id) {
+        setUnoAlert('Вы исключены из игры за AFK');
+        setTimeout(() => {
+          if (roomId) gameApi.reset(roomId).catch(() => {});
+          navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });
+        }, 3000);
+      } else {
+        setGameState((prev) => {
+          if (!prev) return prev;
+          const player = prev.players.find(p => p.user_id === payload.user_id);
+          setUnoAlert(`${player?.username ?? 'Игрок'} исключён за AFK`);
+          setTimeout(() => setUnoAlert(''), 3000);
+          return {
+            ...prev,
+            players: prev.players.filter(p => p.user_id !== payload.user_id),
+            player_order: prev.player_order.filter(id => id !== payload.user_id),
+          };
+        });
+      }
+    },
     onDrawTwoApplied: (payload: any) => {
       const player = gameState?.players.find(p => p.user_id === payload.user_id);
       const name = payload.user_id === me?.id ? 'Вы берёте' : `${player?.username ?? 'Игрок'} берёт`;
@@ -126,6 +149,9 @@ export default function UnoGame() {
     },
 
     onRoomDeleted: () => { leaveVoice(); navigate('/'); },
+    onGameForceEnded: () => {
+      navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });
+    },
     onChatBroadcast: (payload) => {
       setMessages((prev) => [...prev, { ...payload, id: ++msgIdRef.current }]);
     },
@@ -282,12 +308,7 @@ export default function UnoGame() {
 
       {/* Кнопка выхода */}
       <button
-        onClick={async () => {
-          if (roomId) {
-            try { await gameApi.reset(roomId); } catch {}
-          }
-          navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });
-        }}
+        onClick={() => navigate(`/${roomId}`, { replace: false, state: { from: 'game' } })}
         className="absolute top-4 left-4 z-50 text-white/60 hover:text-white text-sm bg-black/30 hover:bg-black/50 px-3 py-2 rounded-lg transition-all"
       >
         ← В комнату
@@ -437,9 +458,6 @@ export default function UnoGame() {
         <VoiceMini
           onJoinWs={sendVoiceJoin}
           onLeaveWs={sendVoiceLeave}
-          onOffer={sendVoiceOffer}
-          onAnswer={sendVoiceAnswer}
-          onIce={sendVoiceIce}
         />
 
         {/* Кнопка показать/скрыть чат */}
@@ -475,10 +493,7 @@ export default function UnoGame() {
             </p>
             <div className="flex gap-3 justify-center">
               <button
-                onClick={async () => {
-                if (roomId) { try { await gameApi.reset(roomId); } catch {} }
-                navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });
-              }}
+                onClick={() => navigate(`/${roomId}`, { replace: false, state: { from: 'game' } })}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-3 rounded-xl"
               >
                 В комнату

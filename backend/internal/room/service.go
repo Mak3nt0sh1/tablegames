@@ -227,6 +227,10 @@ func (s *Service) CreateInviteLink(ctx context.Context, roomUUID string, hostID 
 }
 
 func (s *Service) joinRoom(ctx context.Context, userID uint64, room *models.Room) (*models.Room, error) {
+	// Если уже член комнаты — разрешаем всегда (реконнект)
+	if s.repo.IsMemberDirect(ctx, room.ID, userID) {
+		return room, nil
+	}
 	if room.Status == "playing" {
 		return nil, ErrRoomNotAvail
 	}

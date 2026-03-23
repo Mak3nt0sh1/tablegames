@@ -1,6 +1,6 @@
 // src/components/VoiceChat.tsx
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { Mic, MicOff, Volume2 } from 'lucide-react';
 
 interface VoiceUser {
   user_id: number;
@@ -165,7 +165,6 @@ export default forwardRef(function VoiceChat({
     return () => { if (isInVoiceRef.current) handleLeave(); };
   }, []);
 
-  const othersInVoice = voiceUsers.filter((u) => u.user_id !== currentUserId);
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">

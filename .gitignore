@@ -1,14 +1,28 @@
+# ── Env ───────────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
 # ── Backend (Go) ──────────────────────────────────────────────────────────────
-backend/.env
 backend/tmp/
 backend/*.exe
 backend/*.http
+backend/uploads/
 
 # ── Frontend (Node) ───────────────────────────────────────────────────────────
 frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
 frontend/*.local
+frontend/.env.production
+frontend/.env.local
+
+# ── Playwright ────────────────────────────────────────────────────────────────
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
+frontend/tests-examples/
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 logs/
@@ -17,7 +31,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
 # ── Editor ────────────────────────────────────────────────────────────────────
 .vscode/*
@@ -32,3 +45,5 @@ lerna-debug.log*
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Go ────────────────────────────────────────────────────────────────────────

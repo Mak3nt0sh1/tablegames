@@ -1,7 +1,7 @@
 // src/hooks/useSettings.ts
 // Хук для работы с настройками приложения
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 export interface AppSettings {
   soundEnabled: boolean;

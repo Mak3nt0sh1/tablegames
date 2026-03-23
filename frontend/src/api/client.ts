@@ -136,8 +136,17 @@ export const game = {
   sayUno: (uuid: string): Promise<void> =>
     request(`/api/rooms/${uuid}/game/uno`, { method: 'POST' }),
 
+  status: (uuid: string): Promise<{ status: string }> =>
+    request(`/api/rooms/${uuid}/game/status`),
+
+  activeGame: (): Promise<{ active: boolean; room_uuid?: string }> =>
+    request('/api/game/active'),
+
+  forceEnd: (uuid: string): Promise<void> =>
+    request(`/api/rooms/${uuid}/game/end`, { method: 'POST' }),
+
   reset: (uuid: string): Promise<void> =>
-    request(`/api/rooms/\${uuid}/game/reset`, { method: 'POST' }),
+    request(`/api/rooms/${uuid}/game/reset`, { method: 'POST' }),
 
   challengeUno: (uuid: string, targetUserId: number): Promise<void> =>
     request(`/api/rooms/${uuid}/game/challenge`, {

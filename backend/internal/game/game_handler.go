@@ -134,6 +134,41 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // Сбрасывает состояние игры — вызывается когда все вышли из игры обратно в комнату
 func (h *Handler) ResetGame(w http.ResponseWriter, r *http.Request) {
 	uuid := chi.URLParam(r, "uuid")
-	h.mgr.ResetGame(uuid)
+	h.mgr.ResetGame(r.Context(), uuid)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
+}
+
+// GameStatus — GET /api/rooms/{uuid}/game/status
+// Возвращает реальный статус игры из менеджера (playing/finished/none)
+func (h *Handler) GameStatus(w http.ResponseWriter, r *http.Request) {
+	uuid := chi.URLParam(r, "uuid")
+	status := h.mgr.GetStatus(uuid)
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+// ForceEndGame — POST /api/rooms/{uuid}/game/end
+// Хост принудительно завершает игру
+func (h *Handler) ForceEndGame(w http.ResponseWriter, r *http.Request) {
+	hostID := r.Context().Value(middleware.UserIDKey).(uint64)
+	uuid := chi.URLParam(r, "uuid")
+	if err := h.mgr.ForceEndGame(r.Context(), uuid, hostID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ended"})
+}
+
+// ActiveGame — GET /api/game/active
+// Возвращает активную игру пользователя если есть
+func (h *Handler) ActiveGame(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(middleware.UserIDKey).(uint64)
+	roomUUID, found := h.mgr.GetActiveGame(userID)
+	if !found {
+		writeJSON(w, http.StatusOK, map[string]any{"active": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active":    true,
+		"room_uuid": roomUUID,
+	})
 }

@@ -100,6 +100,9 @@ func main() {
 		r.Post("/api/rooms/{uuid}/game/uno", gameHandler.SayUno)
 		r.Post("/api/rooms/{uuid}/game/challenge", gameHandler.ChallengeUno)
 		r.Post("/api/rooms/{uuid}/game/reset", gameHandler.ResetGame)
+		r.Get("/api/rooms/{uuid}/game/status", gameHandler.GameStatus)
+		r.Post("/api/rooms/{uuid}/game/end", gameHandler.ForceEndGame)
+		r.Get("/api/game/active", gameHandler.ActiveGame)
 
 		// профиль
 		r.Get("/api/profile", profileHandler.GetProfile)

@@ -4,14 +4,11 @@ import { Mic, MicOff, PhoneOff, Phone } from 'lucide-react';
 import { useVoice } from '../context/VoiceContext';
 
 interface VoiceMiniProps {
-  onJoinWs: () => void;   // sendVoiceJoin из useWebSocket
-  onLeaveWs: () => void;  // sendVoiceLeave
-  onOffer: (targetId: number, sdp: string) => void;
-  onAnswer: (targetId: number, sdp: string) => void;
-  onIce: (targetId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => void;
+  onJoinWs: () => void;
+  onLeaveWs: () => void;
 }
 
-export default function VoiceMini({ onJoinWs, onLeaveWs, onOffer, onAnswer, onIce }: VoiceMiniProps) {
+export default function VoiceMini({ onJoinWs, onLeaveWs }: VoiceMiniProps) {
   const { isInVoice, isMuted, voiceUsers, error, join, leave, toggleMute } = useVoice();
 
   const handleJoin = async () => {

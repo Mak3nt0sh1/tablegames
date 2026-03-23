@@ -125,6 +125,12 @@ func (r *Repository) SaveGameResult(ctx context.Context, roomID, userID uint64, 
 	return err
 }
 
+// IsMemberDirect — синхронная проверка членства без error
+func (r *Repository) IsMemberDirect(ctx context.Context, roomID, userID uint64) bool {
+	_, err := r.FindMember(ctx, roomID, userID)
+	return err == nil
+}
+
 func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ? WHERE id = ?`, status, roomID)
 	return err
