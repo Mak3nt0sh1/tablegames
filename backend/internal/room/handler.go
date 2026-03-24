@@ -21,6 +21,7 @@ type Hub interface {
 	NotifyRoomDeleted(roomUUID string)
 	NotifyGameSelected(roomUUID string, gameType string)
 	ForceRemovePlayer(roomUUID string, userID uint64)
+	ResetGameNoCtx(roomUUID string)
 }
 
 func NewHandler(svc *Service, hub Hub) *Handler {
@@ -110,6 +111,8 @@ func (h *Handler) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Сбрасываем активную игру если идёт
+	h.hub.ResetGameNoCtx(uuid)
 	h.hub.NotifyRoomDeleted(uuid)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

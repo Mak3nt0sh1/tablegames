@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -29,6 +30,7 @@ type wsRoom struct {
 type GameManager interface {
 	OnPlayerDisconnected(roomUUID string, userID uint64)
 	ForceRemovePlayer(roomUUID string, userID uint64)
+	ResetGame(ctx context.Context, roomUUID string)
 }
 
 type Hub struct {
@@ -444,8 +446,8 @@ func (h *Hub) NotifyRoomDeleted(roomUUID string) {
 // NotifyGameSelected — хост выбрал игру, рассылаем всем в комнате
 func (h *Hub) NotifyGameSelected(roomUUID string, gameType string) {
 	h.broadcastToRoom(roomUUID, "game_selected", map[string]any{
-		"room_uuid": roomUUID,
-		"game_type": gameType,
+		"room_uuid":  roomUUID,
+		"game_type":  gameType,
 	})
 }
 
@@ -468,5 +470,15 @@ func (h *Hub) ForceRemovePlayer(roomUUID string, userID uint64) {
 	h.mu.RUnlock()
 	if mgr != nil {
 		mgr.ForceRemovePlayer(roomUUID, userID)
+	}
+}
+
+// ResetGameNoCtx — сбрасывает игру без контекста (используется при удалении комнаты)
+func (h *Hub) ResetGameNoCtx(roomUUID string) {
+	h.mu.RLock()
+	mgr := h.gameMgr
+	h.mu.RUnlock()
+	if mgr != nil {
+		mgr.ResetGame(context.Background(), roomUUID)
 	}
 }

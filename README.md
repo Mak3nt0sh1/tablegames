@@ -6,8 +6,6 @@
 tablegames/
 ├── backend/      # Go API сервер
 ├── frontend/     # React приложение
-├── .env          # Переменные окружения (создать вручную)
-└── SETUP.md
 ```
 
 ---
