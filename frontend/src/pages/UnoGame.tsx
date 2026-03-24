@@ -428,7 +428,7 @@ export default function UnoGame() {
             className="absolute z-50 bg-orange-500 hover:bg-orange-400 text-white font-black text-sm px-4 py-2 rounded-xl shadow-xl animate-pulse"
             style={{ bottom: `${140 + idx * 50}px`, left: '8px' }}
           >
-            🎯 Поймать {p.username}!
+            Поймать {p.username}!
           </button>
         ))
       }
@@ -447,7 +447,7 @@ export default function UnoGame() {
               ? 'bg-yellow-400 text-black shadow-yellow-400/40'
               : 'bg-black/50 text-white'
           }`}>
-            {isMyTurn ? '🎮 Ваш ход!' : '⏳ Ожидайте своего хода...'}
+            {isMyTurn ? 'Ваш ход!' : 'Ожидайте своего хода...'}
           </div>
         </div>
         <div className="relative flex justify-center items-end gap-1 pb-6 px-4 flex-wrap">
@@ -495,8 +495,8 @@ export default function UnoGame() {
         <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center">
           <div className="bg-gray-900 border border-gray-700 rounded-3xl p-10 text-center min-w-[320px] shadow-2xl">
             {gameOver.winner === me?.id
-              ? <h2 className="text-4xl font-black text-yellow-400 mb-2">🎉 Победа!</h2>
-              : <h2 className="text-4xl font-black text-gray-400 mb-2">😔 Поражение</h2>
+              ? <h2 className="text-4xl font-black text-yellow-400 mb-2">Победа!</h2>
+              : <h2 className="text-4xl font-black text-gray-400 mb-2">Поражение</h2>
             }
             <p className="text-gray-400 mb-6">
               Победитель: <span className="text-white font-bold">{winnerPlayer?.username ?? '—'}</span>

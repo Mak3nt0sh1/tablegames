@@ -75,7 +75,7 @@ export default function Lobby() {
       {activeGame && (
         <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <p className="text-indigo-400 font-bold">🎮 У вас есть активная игра!</p>
+            <p className="text-indigo-400 font-bold">У вас есть активная игра!</p>
             <p className="text-gray-400 text-sm mt-1">Игра ждёт вашего хода</p>
           </div>
           <button
