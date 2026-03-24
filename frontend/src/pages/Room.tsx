@@ -385,7 +385,7 @@ export default function Room() {
                 }}
                 className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
               >
-                {Array.from({ length: 9 }, (_, i) => i + 2).map((n) => (
+                {Array.from({ length: 3 }, (_, i) => i + 2).map((n) => (
                   <option key={n} value={n} disabled={n < players.length}>
                     {n} {n < players.length ? '(меньше текущих)' : ''}
                   </option>
