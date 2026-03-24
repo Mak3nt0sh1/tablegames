@@ -131,6 +131,21 @@ func (r *Repository) IsMemberDirect(ctx context.Context, roomID, userID uint64) 
 	return err == nil
 }
 
+// FindRoomsByUserID — возвращает список room_id где состоит пользователь
+func (r *Repository) FindRoomsByUserID(ctx context.Context, userID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.SelectContext(ctx, &ids,
+		`SELECT room_id FROM room_members WHERE user_id = ? ORDER BY joined_at DESC`, userID)
+	return ids, err
+}
+
+// FindByID — находит комнату по ID
+func (r *Repository) FindByID(ctx context.Context, roomID uint64) (*models.Room, error) {
+	var room models.Room
+	err := r.db.GetContext(ctx, &room, `SELECT * FROM rooms WHERE id = ?`, roomID)
+	return &room, err
+}
+
 func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ? WHERE id = ?`, status, roomID)
 	return err

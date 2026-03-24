@@ -20,6 +20,7 @@ type Hub interface {
 	KickClient(roomUUID string, targetUserID, byUserID uint64)
 	NotifyRoomDeleted(roomUUID string)
 	NotifyGameSelected(roomUUID string, gameType string)
+	ForceRemovePlayer(roomUUID string, userID uint64)
 }
 
 func NewHandler(svc *Service, hub Hub) *Handler {
@@ -173,6 +174,8 @@ func (h *Handler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Убираем из активной игры если идёт
+	h.hub.ForceRemovePlayer(uuid, userID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
 }
 
@@ -200,6 +203,7 @@ func (h *Handler) KickPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.hub.KickClient(uuid, req.UserID, hostID)
+	h.hub.ForceRemovePlayer(uuid, req.UserID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "kicked"})
 }
 
@@ -228,4 +232,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// GetMyRoom — GET /api/rooms/my
+// Возвращает текущую комнату пользователя если он в ней состоит
+func (h *Handler) GetMyRoom(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(middleware.UserIDKey).(uint64)
+	room, err := h.svc.GetUserRoom(r.Context(), userID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"room": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"room": toRoomJSON(room)})
 }

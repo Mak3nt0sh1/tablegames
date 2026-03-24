@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -24,12 +25,20 @@ type wsRoom struct {
 }
 
 // Hub управляет всеми WS-подключениями
+// GameManager — интерфейс для уведомления об отключении игрока
+type GameManager interface {
+	OnPlayerDisconnected(roomUUID string, userID uint64)
+	ForceRemovePlayer(roomUUID string, userID uint64)
+}
+
 type Hub struct {
-	mu         sync.RWMutex
-	rooms      map[string]*wsRoom
-	register   chan *registerRequest
-	unregister chan *Client
-	incoming   chan *incomingMessage
+	mu          sync.RWMutex
+	rooms       map[string]*wsRoom
+	pendingLeft map[string]*time.Timer
+	gameMgr     GameManager
+	register    chan *registerRequest
+	unregister  chan *Client
+	incoming    chan *incomingMessage
 }
 
 type registerRequest struct {
@@ -48,10 +57,11 @@ type RoomMeta struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		rooms:      make(map[string]*wsRoom),
-		register:   make(chan *registerRequest, 64),
-		unregister: make(chan *Client, 64),
-		incoming:   make(chan *incomingMessage, 256),
+		rooms:       make(map[string]*wsRoom),
+		pendingLeft: make(map[string]*time.Timer),
+		register:    make(chan *registerRequest, 64),
+		unregister:  make(chan *Client, 64),
+		incoming:    make(chan *incomingMessage, 256),
 	}
 }
 
@@ -120,25 +130,48 @@ func (h *Hub) handleUnregister(client *Client) {
 		return
 	}
 	delete(r.clients, client.UserID)
-	delete(r.voiceClients, client.UserID) // убираем из войса если был
-	empty := len(r.clients) == 0
+	delete(r.voiceClients, client.UserID)
 	h.mu.Unlock()
 
 	log.Printf("ws: user=%d (%s) left room=%s", client.UserID, client.Username, client.RoomUUID)
 
-	if empty {
-		h.mu.Lock()
-		delete(h.rooms, client.RoomUUID)
-		h.mu.Unlock()
-		log.Printf("ws: room=%s closed (no players)", client.RoomUUID)
-		return
+	// Grace period 3 секунды — ждём реконнекта при навигации
+	key := client.RoomUUID + ":" + fmt.Sprintf("%d", client.UserID)
+	h.mu.Lock()
+	if t, ok := h.pendingLeft[key]; ok {
+		t.Stop()
 	}
+	h.pendingLeft[key] = time.AfterFunc(3*time.Second, func() {
+		h.mu.Lock()
+		delete(h.pendingLeft, key)
+		r2, exists := h.rooms[client.RoomUUID]
+		if !exists {
+			h.mu.Unlock()
+			return
+		}
+		// Если игрок уже переподключился — не рассылаем player_left
+		if _, reconnected := r2.clients[client.UserID]; reconnected {
+			h.mu.Unlock()
+			return
+		}
+		empty := len(r2.clients) == 0
+		h.mu.Unlock()
 
-	h.broadcastToRoom(client.RoomUUID, EventPlayerLeft, PlayerLeftPayload{
-		UserID:   client.UserID,
-		Username: client.Username,
-		Total:    len(r.clients),
+		if empty {
+			h.mu.Lock()
+			delete(h.rooms, client.RoomUUID)
+			h.mu.Unlock()
+			log.Printf("ws: room=%s closed (no players)", client.RoomUUID)
+			return
+		}
+
+		h.broadcastToRoom(client.RoomUUID, EventPlayerLeft, PlayerLeftPayload{
+			UserID:   client.UserID,
+			Username: client.Username,
+			Total:    len(r2.clients),
+		})
 	})
+	h.mu.Unlock()
 }
 
 // ── входящие сообщения ───────────────────────────────────────────────────────
@@ -419,4 +452,21 @@ func (h *Hub) NotifyGameSelected(roomUUID string, gameType string) {
 // SendToUser — отправляет сообщение конкретному пользователю в комнате
 func (h *Hub) SendToUser(roomUUID string, userID uint64, msgType string, payload any) {
 	h.relayToUser(roomUUID, userID, msgType, payload)
+}
+
+// SetGameManager — устанавливает game manager для уведомлений об отключении
+func (h *Hub) SetGameManager(mgr GameManager) {
+	h.mu.Lock()
+	h.gameMgr = mgr
+	h.mu.Unlock()
+}
+
+// ForceRemovePlayer — убирает игрока из активной игры (при выходе из комнаты или кике)
+func (h *Hub) ForceRemovePlayer(roomUUID string, userID uint64) {
+	h.mu.RLock()
+	mgr := h.gameMgr
+	h.mu.RUnlock()
+	if mgr != nil {
+		mgr.ForceRemovePlayer(roomUUID, userID)
+	}
 }

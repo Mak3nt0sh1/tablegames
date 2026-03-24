@@ -148,6 +148,16 @@ export default function UnoGame() {
       }
     },
 
+    onPlayerLeft: (payload) => {
+      setGameState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          players: prev.players.filter(p => p.user_id !== payload.user_id),
+          player_order: prev.player_order.filter(id => id !== payload.user_id),
+        };
+      });
+    },
     onRoomDeleted: () => { leaveVoice(); navigate('/'); },
     onGameForceEnded: () => {
       navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });

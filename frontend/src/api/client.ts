@@ -77,6 +77,9 @@ export const auth = {
 // ── Rooms ─────────────────────────────────────────────────────────────────────
 
 export const rooms = {
+  my: (): Promise<{ room: Room | null }> =>
+    request('/api/rooms/my'),
+
   create: (body: CreateRoomRequest): Promise<Room> =>
     request('/api/rooms', { method: 'POST', body: JSON.stringify(body) }),
 
@@ -178,6 +181,7 @@ export interface ProfileData {
     score: number;
     played_at: string;
   }>;
+  new_token?: string;
 }
 
 export const profile = {

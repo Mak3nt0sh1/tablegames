@@ -449,11 +449,92 @@ func (m *Manager) GetActiveGame(userID uint64) (string, bool) {
 		if info.game.State.Phase != uno.PhasePlaying {
 			continue
 		}
-		for _, p := range info.game.State.Players {
-			if p.UserID == userID {
+		// Проверяем по PlayerOrder — только активные игроки
+		for _, id := range info.game.State.PlayerOrder {
+			if id == userID {
 				return roomUUID, true
 			}
 		}
 	}
 	return "", false
+}
+
+// OnPlayerDisconnected — вызывается когда игрок отключился от WS
+// Если сейчас его ход — берём карту за него и передаём ход
+func (m *Manager) OnPlayerDisconnected(roomUUID string, userID uint64) {
+	m.mu.Lock()
+	info, ok := m.games[roomUUID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	// Если сейчас не ход этого игрока — ничего не делаем
+	if info.game.State.CurrentPlayerID() != userID {
+		m.mu.Unlock()
+		return
+	}
+	// Берём карту за отключившегося игрока и передаём ход
+	_, _ = info.game.DrawCard(userID)
+	m.mu.Unlock()
+
+	m.broadcastGameState(roomUUID, info.game, "player_disconnected_draw", map[string]any{
+		"user_id": userID,
+	})
+}
+
+// ForceRemovePlayer — принудительно убирает игрока из активной игры (при выходе из комнаты)
+func (m *Manager) ForceRemovePlayer(roomUUID string, userID uint64) {
+	m.mu.Lock()
+	info, ok := m.games[roomUUID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+
+	s := info.game.State
+	// Убираем из очереди ходов
+	newOrder := make([]uint64, 0)
+	for _, id := range s.PlayerOrder {
+		if id != userID {
+			newOrder = append(newOrder, id)
+		}
+	}
+
+	if len(newOrder) == 0 {
+		// Все ушли — просто чистим
+		m.mu.Unlock()
+		return
+	}
+
+	s.PlayerOrder = newOrder
+
+	// Если остался 1 — победитель
+	if len(newOrder) == 1 {
+		winnerID := newOrder[0]
+		s.Winner = &winnerID
+		s.Phase = uno.PhaseFinished
+		scores := info.game.Scores()
+		m.finishedGames[roomUUID] = info.game
+		delete(m.games, roomUUID)
+		m.mu.Unlock()
+		_ = m.roomSvc.SetRoomStatus(context.Background(), roomUUID, "finished")
+		m.hub.BroadcastToRoom(roomUUID, "game_over", map[string]any{
+			"winner":  winnerID,
+			"scores":  scores,
+			"players": s.PublicPlayers(),
+		})
+		return
+	}
+
+	// Если ход был у ушедшего — передаём следующему
+	if s.CurrentPlayerID() == userID {
+		if len(newOrder) > 0 {
+			s.CurrentIndex = s.CurrentIndex % len(newOrder)
+		}
+	}
+	m.mu.Unlock()
+
+	m.broadcastGameState(roomUUID, info.game, "player_left_game", map[string]any{
+		"user_id": userID,
+	})
 }

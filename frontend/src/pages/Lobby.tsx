@@ -1,20 +1,27 @@
 import { useState, useEffect } from 'react';
 import { Users, Plus, LogIn } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { rooms, join, game as gameApi } from '../api/client';
+import type { Room } from '../types';
 
 export default function Lobby() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [activeGame, setActiveGame] = useState<{ room_uuid: string } | null>(null);
+  const [myRoom, setMyRoom] = useState<Room | null>(null);
 
   useEffect(() => {
     gameApi.activeGame().then((res) => {
       if (res.active && res.room_uuid) setActiveGame({ room_uuid: res.room_uuid });
     }).catch(() => {});
-  }, []);
+    // Проверяем есть ли у пользователя активная комната
+    rooms.my().then((res) => {
+      if (res.room) setMyRoom(res.room);
+    }).catch(() => {});
+  }, [location.key]);
 
   // Создать комнату
   const handleCreateRoom = async () => {
@@ -47,6 +54,24 @@ export default function Lobby() {
 
   return (
     <div className="space-y-6">
+      {/* Виджет текущей комнаты */}
+      {myRoom && !activeGame && (
+        <div className="bg-gray-900 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between">
+          <div>
+            <p className="text-white font-bold">Хотите вернуться в: {myRoom.name}</p>
+            <p className="text-gray-400 text-sm mt-1">
+              {myRoom.status === 'waiting' ? 'Ожидание игроков' : 'Игра идёт'} · Код: <span className="font-mono text-indigo-400">{myRoom.invite_code}</span>
+            </p>
+          </div>
+          <button
+            onClick={() => navigate(`/${myRoom.uuid}`)}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors"
+          >
+            Вернуться
+          </button>
+        </div>
+      )}
+
       {activeGame && (
         <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between">
           <div>

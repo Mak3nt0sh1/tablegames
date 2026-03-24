@@ -64,8 +64,13 @@ func generateJWT(user *models.User) (string, error) {
 	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 }
 
-
 // GetUsernames — возвращает map userID -> username для списка ID
 func (s *Service) GetUsernames(ctx context.Context, userIDs []uint64) (map[uint64]string, error) {
 	return s.repo.GetUsernames(ctx, userIDs)
+}
+
+// GenerateToken — публичный метод для генерации JWT (используется при смене ника)
+func (s *Service) GenerateToken(userID uint64, username string) (string, error) {
+	user := &models.User{ID: userID, Username: username}
+	return generateJWT(user)
 }

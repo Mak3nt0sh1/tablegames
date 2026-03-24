@@ -273,6 +273,25 @@ func (s *Service) SaveGameResults(ctx context.Context, roomID uint64, gameType s
 	return nil
 }
 
+// GetUserRoom — возвращает активную комнату пользователя если он в ней состоит
+func (s *Service) GetUserRoom(ctx context.Context, userID uint64) (*models.Room, error) {
+	members, err := s.repo.FindRoomsByUserID(ctx, userID)
+	if err != nil || len(members) == 0 {
+		return nil, ErrRoomNotFound
+	}
+	// Берём последнюю активную комнату
+	for _, roomID := range members {
+		room, err := s.repo.FindByID(ctx, roomID)
+		if err != nil {
+			continue
+		}
+		if room.Status == "waiting" || room.Status == "playing" {
+			return room, nil
+		}
+	}
+	return nil, ErrRoomNotFound
+}
+
 func (s *Service) SetRoomStatus(ctx context.Context, roomUUID string, status string) error {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {

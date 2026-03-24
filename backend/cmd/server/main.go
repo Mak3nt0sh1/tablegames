@@ -44,10 +44,11 @@ func main() {
 	// profile
 	profileRepo := profile.NewRepository(database)
 	profileSvc := profile.NewService(profileRepo)
-	profileHandler := profile.NewHandler(profileSvc)
+	profileHandler := profile.NewHandler(profileSvc, authSvc)
 
 	// game
 	gameMgr := game.NewManager(hub, roomSvc, authSvc)
+	hub.SetGameManager(gameMgr)
 	gameHandler := game.NewHandler(gameMgr)
 
 	// websocket handler
@@ -79,6 +80,7 @@ func main() {
 
 		// комнаты
 		r.Post("/api/rooms", roomHandler.CreateRoom)
+		r.Get("/api/rooms/my", roomHandler.GetMyRoom)
 		r.Get("/api/rooms/{uuid}", roomHandler.GetRoom)
 		r.Patch("/api/rooms/{uuid}", roomHandler.UpdateRoom)
 		r.Delete("/api/rooms/{uuid}", roomHandler.DeleteRoom)

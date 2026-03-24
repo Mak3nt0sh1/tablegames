@@ -13,12 +13,18 @@ import (
 	"github.com/google/uuid"
 )
 
-type Handler struct {
-	svc *Service
+// AuthService — интерфейс для генерации токенов
+type AuthService interface {
+	GenerateToken(userID uint64, username string) (string, error)
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+type Handler struct {
+	svc     *Service
+	authSvc AuthService
+}
+
+func NewHandler(svc *Service, authSvc AuthService) *Handler {
+	return &Handler{svc: svc, authSvc: authSvc}
 }
 
 // GetProfile — GET /api/profile
@@ -58,6 +64,10 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "server error")
 		return
+	}
+	// Генерируем новый JWT с обновлённым username
+	if newToken, err := h.authSvc.GenerateToken(userID, req.Username); err == nil {
+		profile.NewToken = newToken
 	}
 	writeJSON(w, http.StatusOK, profile)
 }

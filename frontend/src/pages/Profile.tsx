@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { User, Gamepad2, Trophy, Camera, Check, X, Pencil } from 'lucide-react';
 import { profile as profileApi } from '../api/client';
 import type { ProfileData } from '../api/client';
 
 export default function Profile() {
+  const location = useLocation();
   const [data, setData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -19,11 +21,12 @@ export default function Profile() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => {
+    setLoading(true);
     profileApi.get()
       .then(setData)
       .catch(() => setError('Не удалось загрузить профиль'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [location.key]);
 
   const handleStartEdit = () => {
     setNewUsername(data?.username ?? '');
@@ -38,6 +41,10 @@ export default function Profile() {
     try {
       const updated = await profileApi.updateUsername(newUsername.trim());
       setData(updated);
+      // Обновляем JWT токен с новым ником
+      if (updated.new_token) {
+        localStorage.setItem('token', updated.new_token);
+      }
       setEditingName(false);
     } catch (e: unknown) {
       setNameError(e instanceof Error ? e.message : 'Ошибка');

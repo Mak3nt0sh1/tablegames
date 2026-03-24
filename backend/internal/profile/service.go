@@ -16,6 +16,7 @@ type ProfileResponse struct {
 	Wins        int           `json:"wins"`
 	WinRate     float64       `json:"win_rate"`
 	History     []GameHistory `json:"history"`
+	NewToken    string        `json:"new_token,omitempty"` // новый JWT при смене ника
 }
 
 type GameHistory struct {
