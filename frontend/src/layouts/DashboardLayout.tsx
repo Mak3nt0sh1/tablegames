@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Gamepad2, User, Settings as SettingsIcon, LogOut } from "lucide-react";
+import { Gamepad2, User, Settings as SettingsIcon, LogOut, BookOpen} from "lucide-react";
 import { auth } from "../api/client";
 
 export default function DashboardLayout() {
@@ -15,6 +15,7 @@ export default function DashboardLayout() {
   const navItems = [
     { path: "/", label: "Игровое Лобби", icon: <Gamepad2 size={20} /> },
     { path: "/profile", label: "Мой Профиль", icon: <User size={20} /> },
+    { path: "/rules", label: "Правила игр", icon: <BookOpen size={20} /> },
     { path: "/settings", label: "Настройки", icon: <SettingsIcon size={20} /> }
   ];
 

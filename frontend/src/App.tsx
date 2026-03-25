@@ -9,6 +9,7 @@ import Register from './pages/Register';
 import Room from './pages/Room';
 import JoinRoom from './pages/JoinRoom';
 import UnoGame from './pages/UnoGame';
+import Rules from './pages/Rules';
 import { token } from './api/client';
 import { VoiceProvider } from './context/VoiceContext';
 
@@ -44,6 +45,7 @@ export default function App() {
           <Route index element={<Lobby />} />
           <Route path=":roomId" element={<Room />} />
           <Route path="profile" element={<Profile />} />
+          <Route path="rules" element={<Rules />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>
