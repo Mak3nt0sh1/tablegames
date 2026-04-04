@@ -24,8 +24,8 @@ jobs:
       - name: Собираем фронтенд
         working-directory: ./frontend
         env:
-          VITE_API_URL: "http://${{ secrets.SERVER_IP }}"
-          VITE_WS_URL: "ws://${{ secrets.SERVER_IP }}"
+          VITE_API_URL: "https://tablegames.site"
+          VITE_WS_URL: "wss://tablegames.site"
         run: |
           npm install
           npm run build
