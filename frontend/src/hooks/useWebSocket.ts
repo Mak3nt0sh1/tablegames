@@ -25,6 +25,7 @@ export interface WsHandlers {
   onRoomState?: (payload: RoomStatePayload) => void;
   onPlayerJoined?: (payload: PlayerJoinedPayload) => void;
   onPlayerLeft?: (payload: PlayerLeftPayload) => void;
+  onChatHistory?: (payload: ChatPayload[]) => void;
   onChatBroadcast?: (payload: ChatPayload) => void;
   onGameStarted?: (payload: GameStartedPayload) => void;
   onGameStateUpdate?: (payload: GameStateUpdatePayload) => void;
@@ -96,6 +97,7 @@ export function useWebSocket(roomUUID: string | null, handlers: WsHandlers) {
         case 'room_state':        h.onRoomState?.(msg.payload as RoomStatePayload); break;
         case 'player_joined':     h.onPlayerJoined?.(msg.payload as PlayerJoinedPayload); break;
         case 'player_left':       h.onPlayerLeft?.(msg.payload as PlayerLeftPayload); break;
+        case 'chat_history':      h.onChatHistory?.(msg.payload as ChatPayload[]); break;
         case 'chat_broadcast':    h.onChatBroadcast?.(msg.payload as ChatPayload); break;
         case 'game_started':      h.onGameStarted?.(msg.payload as GameStartedPayload); break;
         case 'game_state_update': h.onGameStateUpdate?.(msg.payload as GameStateUpdatePayload); break;

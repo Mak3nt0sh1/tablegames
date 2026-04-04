@@ -5,9 +5,9 @@ import type {
   LoginRequest, RegisterRequest, AuthResponse, User,
   Room, CreateRoomRequest, UpdateRoomRequest, JoinByCodeRequest,
   GameState, ApiError,
-} from '../types';
+} from '../types/';
 
-const BASE_URL = 'http://localhost:8080';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 // ── Token storage ─────────────────────────────────────────────────────────────
 
@@ -162,7 +162,7 @@ export const game = {
 
 export const wsUrl = (roomUUID: string): string => {
   const t = token.get();
-  return `ws://localhost:8080/api/rooms/${roomUUID}/ws?token=${t}`;
+  return `${import.meta.env.VITE_WS_URL || 'ws://localhost:8080'}/api/rooms/${roomUUID}/ws?token=${t}`;
 };
 
 // ── Profile ───────────────────────────────────────────────────────────────────

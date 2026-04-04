@@ -1,5 +1,4 @@
-// src/pages/UnoGame.tsx
-import { useState, useEffect, useRef} from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSound } from '../hooks/useSound';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -9,18 +8,12 @@ import Chat from '../components/Chat';
 import VoiceMini from '../components/VoiceMini';
 import { useVoice } from '../context/VoiceContext';
 import UnoCard from '../components/UnoCard';
-import type { GameState, GamePlayer, GameStateUpdatePayload } from '../types';
+import type { GameState, GamePlayer, GameStateUpdatePayload, RoomStatePayload } from '../types';
 
 const colorBg: Record<string, string> = {
   red: 'bg-red-500', green: 'bg-green-500',
   blue: 'bg-blue-500', yellow: 'bg-yellow-400',
 };
-
-const positions = [
-  'top-4 left-1/2 -translate-x-1/2',
-  'right-4 top-1/2 -translate-y-1/2',
-  'left-4 top-1/2 -translate-y-1/2',
-];
 
 export default function UnoGame() {
   const navigate = useNavigate();
@@ -33,15 +26,13 @@ export default function UnoGame() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [unoAlert, setUnoAlert] = useState('');
-  const [unoIntended, setUnoIntended] = useState(false); // игрок нажал UNO до броска
+  const [unoIntended, setUnoIntended] = useState(false); 
 
-  // Чат и войс
   const [messages, setMessages] = useState<Array<{ user_id: number; username: string; text: string; id: number }>>([]);
   const msgIdRef = useRef(0);
   const [showChat, setShowChat] = useState(false);
   const [gameOver, setGameOver] = useState<null | { winner: number; players: GamePlayer[] }>(null);
 
-  // Загружаем начальное состояние
   useEffect(() => {
     if (!roomId) return;
     gameApi.getState(roomId)
@@ -55,16 +46,20 @@ export default function UnoGame() {
       });
   }, [roomId]);
 
-  // WebSocket — получаем обновления в реалтайм
   const { setVoiceUsers, handleOffer, handleAnswer, handleIce, initPeer, leave: leaveVoice } = useVoice();
 
   const { sendChat, sendVoiceJoin, sendVoiceLeave, sendVoiceOffer, sendVoiceAnswer, sendVoiceIce } = useWebSocket(roomId ?? null, {
+    onRoomState: (payload: RoomStatePayload) => {
+      if (payload.voice_users) {
+        setVoiceUsers(payload.voice_users.map(u => ({ user_id: u.user_id, username: u.username })));
+      }
+    },
     onGameStateUpdate: (payload: GameStateUpdatePayload) => {
       setGameState((prev) => prev ? {
         ...prev,
         top_card: payload.top_card,
         current_color: payload.current_color,
-        current_turn: payload.current_turn,
+        current_turn: Number(payload.current_turn),
         direction: payload.direction,
         draw_pending: payload.draw_pending,
         players: payload.players,
@@ -72,21 +67,20 @@ export default function UnoGame() {
         draw_pile_size: payload.draw_pile_size,
       } : prev);
 
-      // Звук и уведомление когда наш ход
-      if (payload.current_turn === me?.id) {
+      if (Number(payload.current_turn) === Number(me?.id)) {
         play('your_turn');
         notify('Ваш ход!', 'Сыграйте карту или возьмите из колоды');
       }
     },
 
     onYourHand: (payload) => {
-      if (payload.user_id === me?.id) {
+      if (Number(payload.user_id) === Number(me?.id)) {
         setGameState((prev) => prev ? { ...prev, your_hand: payload.hand } : prev);
       }
     },
 
     onYourDrawnCards: (payload) => {
-      if (payload.user_id === me?.id) {
+      if (Number(payload.user_id) === Number(me?.id)) {
         setGameState((prev) => prev ? {
           ...prev,
           your_hand: [...prev.your_hand, ...payload.cards],
@@ -96,16 +90,15 @@ export default function UnoGame() {
     },
 
     onUnoCalled: (payload) => {
-      const player = gameState?.players.find(p => p.user_id === payload.user_id);
+      const player = gameState?.players.find(p => Number(p.user_id) === Number(payload.user_id));
       const name = player?.username ?? `Игрок ${payload.user_id}`;
-      setUnoAlert(payload.user_id === me?.id ? 'Вы крикнули UNO!' : `${name} кричит UNO!`);
+      setUnoAlert(Number(payload.user_id) === Number(me?.id) ? 'Вы крикнули UNO!' : `${name} кричит UNO!`);
       setTimeout(() => setUnoAlert(''), 2500);
       play('uno_called');
     },
 
-
     onPlayerRemoved: (payload: any) => {
-      if (payload.user_id === me?.id) {
+      if (Number(payload.user_id) === Number(me?.id)) {
         setUnoAlert('Вы исключены из игры за AFK');
         setTimeout(() => {
           if (roomId) gameApi.reset(roomId).catch(() => {});
@@ -114,25 +107,25 @@ export default function UnoGame() {
       } else {
         setGameState((prev) => {
           if (!prev) return prev;
-          const player = prev.players.find(p => p.user_id === payload.user_id);
+          const player = prev.players.find(p => Number(p.user_id) === Number(payload.user_id));
           setUnoAlert(`${player?.username ?? 'Игрок'} исключён за AFK`);
           setTimeout(() => setUnoAlert(''), 3000);
           return {
             ...prev,
-            players: prev.players.filter(p => p.user_id !== payload.user_id),
-            player_order: prev.player_order.filter(id => id !== payload.user_id),
+            players: prev.players.filter(p => Number(p.user_id) !== Number(payload.user_id)),
+            player_order: prev.player_order.filter(id => Number(id) !== Number(payload.user_id)),
           };
         });
       }
     },
     onDrawTwoApplied: (payload: any) => {
-      const player = gameState?.players.find(p => p.user_id === payload.user_id);
-      const name = payload.user_id === me?.id ? 'Вы берёте' : `${player?.username ?? 'Игрок'} берёт`;
+      const player = gameState?.players.find(p => Number(p.user_id) === Number(payload.user_id));
+      const name = Number(payload.user_id) === Number(me?.id) ? 'Вы берёте' : `${player?.username ?? 'Игрок'} берёт`;
       setUnoAlert(`${name} +${payload.count} карты!`);
       setTimeout(() => setUnoAlert(''), 2000);
     },
     onUnoChallenge: (payload) => {
-      if (payload.target_id === me?.id) {
+      if (Number(payload.target_id) === Number(me?.id)) {
         setGameState((prev) => prev ? { ...prev, players: payload.players } : prev);
         setUnoAlert(`Вас поймали без UNO! +${payload.cards_drawn} карты`);
         setTimeout(() => setUnoAlert(''), 2500);
@@ -141,7 +134,7 @@ export default function UnoGame() {
 
     onGameOver: (payload) => {
       setGameOver({ winner: payload.winner, players: payload.players });
-      if (payload.winner === me?.id) {
+      if (Number(payload.winner) === Number(me?.id)) {
         play('game_over_win');
       } else {
         play('game_over_lose');
@@ -153,8 +146,8 @@ export default function UnoGame() {
         if (!prev) return prev;
         return {
           ...prev,
-          players: prev.players.filter(p => p.user_id !== payload.user_id),
-          player_order: prev.player_order.filter(id => id !== payload.user_id),
+          players: prev.players.filter(p => Number(p.user_id) !== Number(payload.user_id)),
+          player_order: prev.player_order.filter(id => Number(id) !== Number(payload.user_id)),
         };
       });
     },
@@ -162,33 +155,36 @@ export default function UnoGame() {
     onGameForceEnded: () => {
       navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });
     },
+    onChatHistory: (payload) => {
+      setMessages(payload.map((msg) => ({ ...msg, id: ++msgIdRef.current })));
+    },
     onChatBroadcast: (payload) => {
       setMessages((prev) => [...prev, { ...payload, id: ++msgIdRef.current }]);
     },
     onVoiceUserJoined: (payload) => {
       const user = { user_id: payload.user_id, username: payload.username };
-      setVoiceUsers((prev) => prev.find((u) => u.user_id === user.user_id) ? prev : [...prev, user]);
-      initPeer(payload.user_id, sendVoiceOffer, sendVoiceIce).catch(console.error);
+      setVoiceUsers((prev) => prev.find((u) => Number(u.user_id) === Number(user.user_id)) ? prev : [...prev, user]);
+      // ИСПРАВЛЕНИЕ: Не звоним сами себе
+      if (Number(payload.user_id) !== Number(me?.id)) {
+        initPeer(payload.user_id, sendVoiceOffer, sendVoiceIce).catch(console.error);
+      }
     },
     onVoiceUserLeft: (payload) => {
-      setVoiceUsers((prev) => prev.filter((u) => u.user_id !== payload.user_id));
+      setVoiceUsers((prev) => prev.filter((u) => Number(u.user_id) !== Number(payload.user_id)));
     },
     onVoiceOffer: (payload: any) => handleOffer(payload.from_user_id, payload.sdp, sendVoiceAnswer, sendVoiceIce),
     onVoiceAnswer: (payload: any) => handleAnswer(payload.from_user_id, payload.sdp),
     onVoiceIceCandidate: (payload: any) => handleIce(payload.from_user_id, payload.candidate, payload.sdp_mid, payload.sdp_mline_index),
   });
 
-  // Сыграть карту
   const handlePlayCard = async (cardId: number) => {
-    if (!roomId || gameState?.current_turn !== me?.id) return;
+    if (!roomId || Number(gameState?.current_turn) !== Number(me?.id)) return;
     try {
       await gameApi.playCard(roomId, cardId);
       play('card_play');
-      // Убираем карту из руки сразу после успешного ответа сервера
       setGameState((prev) => {
         if (!prev) return prev;
         const newHand = prev.your_hand.filter(c => c.id !== cardId);
-        // Если было намерение UNO и теперь осталась 1 карта — вызываем sayUno
         if (unoIntended && newHand.length === 1) {
           setUnoIntended(false);
           gameApi.sayUno(roomId!).then(() => {
@@ -196,24 +192,21 @@ export default function UnoGame() {
             setTimeout(() => setUnoAlert(''), 2500);
           }).catch(() => {});
         } else if (newHand.length > 1) {
-          setUnoIntended(false); // сбрасываем если вдруг взяли карту
+          setUnoIntended(false); 
         }
         return { ...prev, your_hand: newHand };
       });
     } catch (e: unknown) {
-      // Не анимируем ошибку на карте — просто показываем текст
       setError(e instanceof Error ? e.message : 'Нельзя сыграть эту карту');
       setTimeout(() => setError(''), 2000);
       play('error');
     }
   };
 
-  // Взять карту
   const handleDrawCard = async () => {
-    if (!roomId || gameState?.current_turn !== me?.id) return;
+    if (!roomId || Number(gameState?.current_turn) !== Number(me?.id)) return;
     try {
       await gameApi.drawCard(roomId);
-      // Обновляем состояние — ход переходит после взятия
       const updated = await gameApi.getState(roomId);
       setGameState(updated);
     } catch (e: unknown) {
@@ -222,7 +215,6 @@ export default function UnoGame() {
     }
   };
 
-  // Challenge — поймать соперника без UNO
   const handleChallenge = async (targetId: number) => {
     if (!roomId) return;
     try {
@@ -233,18 +225,15 @@ export default function UnoGame() {
     }
   };
 
-  // Кнопка UNO
   const handleSayUno = async () => {
     if (!roomId) return;
     if (gameState && gameState.your_hand.length === 2) {
-      // Запоминаем намерение — скажем UNO автоматически после броска
       setUnoIntended(true);
       play('uno_called');
       setUnoAlert('UNO готово! Бросайте карту');
       setTimeout(() => setUnoAlert(''), 2000);
       return;
     }
-    // При 1 карте — вызываем API напрямую
     try {
       await gameApi.sayUno(roomId);
       play('uno_called');
@@ -277,10 +266,36 @@ export default function UnoGame() {
     );
   }
 
-  const isMyTurn = gameState.current_turn === me?.id;
-  const opponents = gameState.players.filter(p => p.user_id !== me?.id);
+  // ИСПРАВЛЕНИЕ: Чтобы карты не горели для всех при перезаходе, мы сверяем что игра еще идет
+  const isMyTurn = gameState.phase === 'playing' && Number(gameState.current_turn) === Number(me?.id);
+
+  const orderedPlayers = (gameState.player_order || []).map(id => 
+    gameState.players.find(p => Number(p.user_id) === Number(id))
+  ).filter(Boolean) as GamePlayer[];
+
+  const myIndex = orderedPlayers.findIndex(p => Number(p.user_id) === Number(me?.id));
+  const rotatedPlayers = myIndex >= 0 
+    ? [...orderedPlayers.slice(myIndex), ...orderedPlayers.slice(0, myIndex)]
+    : orderedPlayers;
+  
+  const opponents = rotatedPlayers.slice(1);
+
+  const getPositions = (count: number) => {
+    if (count === 1) return ['top-8 left-1/2 -translate-x-1/2'];
+    if (count === 2) return [
+      'left-8 top-1/2 -translate-y-1/2', 
+      'right-8 top-1/2 -translate-y-1/2'
+    ];
+    return [
+      'left-8 top-1/2 -translate-y-1/2', 
+      'top-8 left-1/2 -translate-x-1/2', 
+      'right-8 top-1/2 -translate-y-1/2'
+    ];
+  };
+  const uiPositions = getPositions(opponents.length);
+
   const winnerPlayer = gameOver
-    ? [...gameState.players, ...(gameOver.players ?? [])].find(p => p.user_id === gameOver.winner)
+    ? [...gameState.players, ...(gameOver.players ?? [])].find(p => Number(p.user_id) === Number(gameOver.winner))
     : undefined;
 
   return (
@@ -288,17 +303,11 @@ export default function UnoGame() {
       className="relative w-screen h-screen overflow-hidden select-none"
       style={{ background: 'radial-gradient(ellipse at center, #1e3a6e 0%, #0f1f4a 50%, #060d24 100%)' }}
     >
-      {/* Текстура сукна */}
       <div className="absolute inset-0 opacity-10"
         style={{
-          backgroundImage: `repeating-linear-gradient(
-            45deg, transparent, transparent 2px,
-            rgba(255,255,255,0.03) 2px, rgba(255,255,255,0.03) 4px
-          )`
+          backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(255,255,255,0.03) 2px, rgba(255,255,255,0.03) 4px)`
         }}
       />
-
-      {/* Овальный стол */}
       <div
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[820px] h-[520px] rounded-[50%] z-0"
         style={{
@@ -306,8 +315,6 @@ export default function UnoGame() {
           boxShadow: '0 0 0 14px #c8a96e, 0 0 0 20px #7a5c2a, 0 24px 80px rgba(0,0,0,0.9)',
         }}
       />
-
-      {/* Блик на столе */}
       <div
         className="absolute top-1/2 left-1/2 w-[560px] h-[240px] rounded-[50%] z-0 pointer-events-none"
         style={{
@@ -316,7 +323,6 @@ export default function UnoGame() {
         }}
       />
 
-      {/* Кнопка выхода */}
       <button
         onClick={() => navigate(`/${roomId}`, { replace: false, state: { from: 'game' } })}
         className="absolute top-4 left-4 z-50 text-white/60 hover:text-white text-sm bg-black/30 hover:bg-black/50 px-3 py-2 rounded-lg transition-all"
@@ -324,7 +330,6 @@ export default function UnoGame() {
         ← В комнату
       </button>
 
-      {/* Инфо панель */}
       <div className="absolute top-4 right-4 z-50 text-white/60 text-sm bg-black/30 px-3 py-2 rounded-lg flex items-center gap-3">
         <span>{gameState.direction === 1 ? '↻ По часовой' : '↺ Против часовой'}</span>
         <span className="text-white/40">|</span>
@@ -334,25 +339,22 @@ export default function UnoGame() {
         )}
       </div>
 
-      {/* Ошибка */}
       {error && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-red-600/90 text-white font-bold text-sm px-5 py-2 rounded-xl shadow-xl">
           {error}
         </div>
       )}
 
-      {/* UNO алерт */}
       {unoAlert && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white font-black text-lg px-6 py-3 rounded-2xl shadow-xl animate-bounce">
           {unoAlert}
         </div>
       )}
 
-      {/* Соперники */}
       {opponents.map((player, idx) => {
-        const isActive = gameState.current_turn === player.user_id;
+        const isActive = gameState.phase === 'playing' && Number(gameState.current_turn) === Number(player.user_id);
         return (
-          <div key={player.user_id} className={`absolute ${positions[idx]} flex flex-col items-center gap-2 z-10`}>
+          <div key={player.user_id} className={`absolute ${uiPositions[idx]} flex flex-col items-center gap-2 z-10`}>
             <div className={`text-sm font-bold px-3 py-1 rounded-full transition-all shadow-lg ${
               isActive ? 'bg-yellow-400 text-black scale-110 shadow-yellow-400/40' : 'bg-black/50 text-white'
             }`}>
@@ -374,9 +376,7 @@ export default function UnoGame() {
         );
       })}
 
-      {/* Центральный стол — колода и сброс */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-10 z-20">
-        {/* Колода */}
         <div className="flex flex-col items-center gap-2">
           <div
             onClick={handleDrawCard}
@@ -396,10 +396,8 @@ export default function UnoGame() {
           </div>
         </div>
 
-        {/* Разделитель */}
         <div className="w-px h-20 bg-white/10" />
 
-        {/* Карта сброса */}
         <div className="flex flex-col items-center gap-2">
           <div className={`w-5 h-5 rounded-full ring-2 ring-white shadow-lg ${colorBg[gameState.current_color] ?? 'bg-gray-500'}`} />
           <UnoCard card={gameState.top_card} />
@@ -407,7 +405,6 @@ export default function UnoGame() {
         </div>
       </div>
 
-      {/* UNO кнопка — показываем когда осталась 1 карта */}
       {(gameState.your_hand.length === 2 || gameState.your_hand.length === 1) && isMyTurn && (
         <button
           onClick={handleSayUno}
@@ -418,7 +415,6 @@ export default function UnoGame() {
         </button>
       )}
 
-      {/* Challenge кнопки — поймать соперника у которого 1 карта и не крикнул UNO */}
       {opponents
         .filter(p => p.card_count === 1 && !p.said_uno)
         .map((p, idx) => (
@@ -433,10 +429,7 @@ export default function UnoGame() {
         ))
       }
 
-
-
-      {/* Мои карты */}
-      <div className="absolute bottom-0 left-0 right-0 z-30">
+      <div className={`absolute bottom-0 left-0 right-0 z-30 transition-all duration-300 ${showChat ? 'pr-64' : ''}`}>
         <div
           className="absolute bottom-0 left-0 right-0 h-40 pointer-events-none"
           style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%)' }}
@@ -462,15 +455,12 @@ export default function UnoGame() {
         </div>
       </div>
 
-      {/* Боковая панель: войс + чат */}
       <div className="absolute right-4 top-16 bottom-4 z-40 flex flex-col gap-2 w-64">
-        {/* Войс чат */}
         <VoiceMini
           onJoinWs={sendVoiceJoin}
           onLeaveWs={sendVoiceLeave}
         />
 
-        {/* Кнопка показать/скрыть чат */}
         <button
           onClick={() => setShowChat((v) => !v)}
           className="bg-black/40 hover:bg-black/60 text-white/70 hover:text-white text-sm px-3 py-2 rounded-xl transition-colors flex items-center gap-2"
@@ -478,7 +468,6 @@ export default function UnoGame() {
           💬 {showChat ? 'Скрыть чат' : `Чат${messages.length > 0 ? ` (${messages.length})` : ''}`}
         </button>
 
-        {/* Чат */}
         {showChat && (
           <div className="flex-1 min-h-0">
             <Chat
@@ -490,11 +479,10 @@ export default function UnoGame() {
         )}
       </div>
 
-      {/* Экран победы/поражения */}
       {gameOver && (
         <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center">
           <div className="bg-gray-900 border border-gray-700 rounded-3xl p-10 text-center min-w-[320px] shadow-2xl">
-            {gameOver.winner === me?.id
+            {Number(gameOver.winner) === Number(me?.id)
               ? <h2 className="text-4xl font-black text-yellow-400 mb-2">Победа!</h2>
               : <h2 className="text-4xl font-black text-gray-400 mb-2">Поражение</h2>
             }

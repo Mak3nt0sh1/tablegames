@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
 
-interface Section {
-  title: string;
-  content: React.ReactNode;
-}
+// interface Section {
+//   title: string;
+//   content: React.ReactNode;
+// }
 
 function Accordion({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);

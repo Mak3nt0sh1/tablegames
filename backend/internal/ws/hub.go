@@ -14,19 +14,17 @@ type incomingMessage struct {
 	msg    Message
 }
 
-// wsRoom — состояние одной комнаты внутри Hub
 type wsRoom struct {
 	uuid         string
 	name         string
 	hostID       uint64
 	maxPlayers   int
 	status       string
-	clients      map[uint64]*Client // userID -> Client
-	voiceClients map[uint64]bool    // кто сейчас в голосовом чате
+	clients      map[uint64]*Client
+	voiceClients map[uint64]bool
+	chatHistory  []ChatPayload
 }
 
-// Hub управляет всеми WS-подключениями
-// GameManager — интерфейс для уведомления об отключении игрока
 type GameManager interface {
 	OnPlayerDisconnected(roomUUID string, userID uint64)
 	ForceRemovePlayer(roomUUID string, userID uint64)
@@ -48,7 +46,6 @@ type registerRequest struct {
 	roomMeta RoomMeta
 }
 
-// RoomMeta — минимальная инфа о комнате при регистрации клиента
 type RoomMeta struct {
 	UUID       string
 	Name       string
@@ -80,8 +77,6 @@ func (h *Hub) Run() {
 	}
 }
 
-// ── регистрация ──────────────────────────────────────────────────────────────
-
 func (h *Hub) handleRegister(req *registerRequest) {
 	h.mu.Lock()
 	r, exists := h.rooms[req.roomMeta.UUID]
@@ -104,6 +99,13 @@ func (h *Hub) handleRegister(req *registerRequest) {
 
 	h.sendRoomState(req.client, r)
 
+	h.mu.RLock()
+	history := r.chatHistory
+	h.mu.RUnlock()
+	if history != nil {
+		req.client.sendMsg("chat_history", history)
+	}
+
 	role := "player"
 	if req.client.UserID == r.hostID {
 		role = "host"
@@ -118,8 +120,6 @@ func (h *Hub) handleRegister(req *registerRequest) {
 	})
 }
 
-// ── отключение ───────────────────────────────────────────────────────────────
-
 func (h *Hub) handleUnregister(client *Client) {
 	h.mu.Lock()
 	r, exists := h.rooms[client.RoomUUID]
@@ -127,22 +127,29 @@ func (h *Hub) handleUnregister(client *Client) {
 		h.mu.Unlock()
 		return
 	}
-	if _, ok := r.clients[client.UserID]; !ok {
-		h.mu.Unlock()
-		return
+
+	// ИСПРАВЛЕНИЕ: Защита от гонки (Race Condition).
+	// Если клиент в мапе не совпадает с тем, кто отключается (значит игрок уже обновил страницу и зашёл с новым сокетом), мы ИГНОРИРУЕМ удаление!
+	if currentClient, ok := r.clients[client.UserID]; ok {
+		if currentClient != client {
+			h.mu.Unlock()
+			return
+		}
 	}
+
 	delete(r.clients, client.UserID)
-	delete(r.voiceClients, client.UserID)
+	wasInVoice := r.voiceClients[client.UserID]
+	// Мы НЕ удаляем из voiceClients сразу, чтобы при обновлении страницы (F5) человек оставался в войсе
 	h.mu.Unlock()
 
-	log.Printf("ws: user=%d (%s) left room=%s", client.UserID, client.Username, client.RoomUUID)
+	log.Printf("ws: user=%d (%s) connection dropped room=%s", client.UserID, client.Username, client.RoomUUID)
 
-	// Grace period 3 секунды — ждём реконнекта при навигации
 	key := client.RoomUUID + ":" + fmt.Sprintf("%d", client.UserID)
 	h.mu.Lock()
 	if t, ok := h.pendingLeft[key]; ok {
 		t.Stop()
 	}
+	// Ждём 3 секунды. Если игрок не вернулся — удаляем окончательно
 	h.pendingLeft[key] = time.AfterFunc(3*time.Second, func() {
 		h.mu.Lock()
 		delete(h.pendingLeft, key)
@@ -151,12 +158,18 @@ func (h *Hub) handleUnregister(client *Client) {
 			h.mu.Unlock()
 			return
 		}
-		// Если игрок уже переподключился — не рассылаем player_left
+		// Если игрок успел переподключиться
 		if _, reconnected := r2.clients[client.UserID]; reconnected {
 			h.mu.Unlock()
 			return
 		}
+
 		empty := len(r2.clients) == 0
+
+		// Только теперь удаляем из войса
+		if wasInVoice {
+			delete(r2.voiceClients, client.UserID)
+		}
 		h.mu.Unlock()
 
 		if empty {
@@ -167,6 +180,12 @@ func (h *Hub) handleUnregister(client *Client) {
 			return
 		}
 
+		if wasInVoice {
+			h.broadcastToRoom(client.RoomUUID, EventVoiceUserLeft, VoiceUserPayload{
+				UserID:   client.UserID,
+				Username: client.Username,
+			})
+		}
 		h.broadcastToRoom(client.RoomUUID, EventPlayerLeft, PlayerLeftPayload{
 			UserID:   client.UserID,
 			Username: client.Username,
@@ -175,8 +194,6 @@ func (h *Hub) handleUnregister(client *Client) {
 	})
 	h.mu.Unlock()
 }
-
-// ── входящие сообщения ───────────────────────────────────────────────────────
 
 func (h *Hub) handleIncoming(im *incomingMessage) {
 	switch im.msg.Type {
@@ -193,13 +210,23 @@ func (h *Hub) handleIncoming(im *incomingMessage) {
 			im.client.sendError("message too long (max 500 chars)")
 			return
 		}
-		h.broadcastToRoom(im.client.RoomUUID, EventChatBroadcast, ChatPayload{
+
+		msgPayload := ChatPayload{
 			UserID:   im.client.UserID,
 			Username: im.client.Username,
 			Text:     p.Text,
-		})
+		}
 
-	// ── WebRTC signaling ─────────────────────────────────────────────────────
+		h.mu.Lock()
+		if r, ok := h.rooms[im.client.RoomUUID]; ok {
+			r.chatHistory = append(r.chatHistory, msgPayload)
+			if len(r.chatHistory) > 50 {
+				r.chatHistory = r.chatHistory[1:]
+			}
+		}
+		h.mu.Unlock()
+
+		h.broadcastToRoom(im.client.RoomUUID, EventChatBroadcast, msgPayload)
 
 	case EventVoiceOffer:
 		var p VoiceOfferPayload
@@ -229,28 +256,22 @@ func (h *Hub) handleIncoming(im *incomingMessage) {
 		h.relayToUser(im.client.RoomUUID, p.TargetUserID, EventVoiceIceCandidate, p)
 
 	case EventVoiceJoin:
-		// Клиент включил микрофон — добавляем в voiceClients и бродкастим всем
 		h.mu.Lock()
 		if r, ok := h.rooms[im.client.RoomUUID]; ok {
 			r.voiceClients[im.client.UserID] = true
 		}
 		h.mu.Unlock()
-
-		log.Printf("ws: user=%d (%s) joined voice in room=%s", im.client.UserID, im.client.Username, im.client.RoomUUID)
 		h.broadcastToRoom(im.client.RoomUUID, EventVoiceUserJoined, VoiceUserPayload{
 			UserID:   im.client.UserID,
 			Username: im.client.Username,
 		})
 
 	case EventVoiceLeave:
-		// Клиент выключил микрофон
 		h.mu.Lock()
 		if r, ok := h.rooms[im.client.RoomUUID]; ok {
 			delete(r.voiceClients, im.client.UserID)
 		}
 		h.mu.Unlock()
-
-		log.Printf("ws: user=%d (%s) left voice in room=%s", im.client.UserID, im.client.Username, im.client.RoomUUID)
 		h.broadcastToRoom(im.client.RoomUUID, EventVoiceUserLeft, VoiceUserPayload{
 			UserID:   im.client.UserID,
 			Username: im.client.Username,
@@ -263,8 +284,6 @@ func (h *Hub) handleIncoming(im *incomingMessage) {
 		im.client.sendError("unknown event type: " + im.msg.Type)
 	}
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 func (h *Hub) sendRoomState(client *Client, r *wsRoom) {
 	h.mu.RLock()
@@ -280,6 +299,16 @@ func (h *Hub) sendRoomState(client *Client, r *wsRoom) {
 			Role:     role,
 		})
 	}
+
+	voiceUsers := make([]PlayerInfo, 0)
+	for uid := range r.voiceClients {
+		if c, ok := r.clients[uid]; ok {
+			voiceUsers = append(voiceUsers, PlayerInfo{
+				UserID:   c.UserID,
+				Username: c.Username,
+			})
+		}
+	}
 	h.mu.RUnlock()
 
 	client.sendMsg(EventRoomState, RoomStatePayload{
@@ -289,10 +318,10 @@ func (h *Hub) sendRoomState(client *Client, r *wsRoom) {
 		MaxPlayers: r.maxPlayers,
 		Status:     r.status,
 		Players:    players,
+		VoiceUsers: voiceUsers,
 	})
 }
 
-// relayToUser — пересылает сообщение конкретному пользователю в комнате
 func (h *Hub) relayToUser(roomUUID string, targetUserID uint64, msgType string, payload any) {
 	h.mu.RLock()
 	r, ok := h.rooms[roomUUID]
@@ -304,7 +333,7 @@ func (h *Hub) relayToUser(roomUUID string, targetUserID uint64, msgType string, 
 	h.mu.RUnlock()
 
 	if !ok {
-		return // целевой пользователь не в комнате
+		return
 	}
 	target.sendMsg(msgType, payload)
 }
@@ -330,7 +359,6 @@ func (h *Hub) broadcastToRoom(roomUUID string, msgType string, payload any) {
 		select {
 		case c.send <- data:
 		default:
-			log.Printf("ws: send buffer full for user=%d, dropping broadcast", c.UserID)
 		}
 	}
 }
@@ -357,38 +385,10 @@ func (h *Hub) broadcastExcept(r *wsRoom, excludeUserID uint64, msgType string, p
 	}
 }
 
-// BroadcastToRoom — публичный метод для game engine
 func (h *Hub) BroadcastToRoom(roomUUID string, msgType string, payload any) {
 	h.broadcastToRoom(roomUUID, msgType, payload)
 }
 
-// GetRoomPlayerCount — сколько игроков онлайн
-func (h *Hub) GetRoomPlayerCount(roomUUID string) int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if r, ok := h.rooms[roomUUID]; ok {
-		return len(r.clients)
-	}
-	return 0
-}
-
-// GetVoiceUsers — кто сейчас в голосовом чате
-func (h *Hub) GetVoiceUsers(roomUUID string) []uint64 {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	r, ok := h.rooms[roomUUID]
-	if !ok {
-		return nil
-	}
-	users := make([]uint64, 0, len(r.voiceClients))
-	for uid := range r.voiceClients {
-		users = append(users, uid)
-	}
-	return users
-}
-
-// KickClient — принудительно отключает клиента и сообщает ему причину.
-// Вызывается из room handler после удаления из БД.
 func (h *Hub) KickClient(roomUUID string, targetUserID, byUserID uint64) {
 	h.mu.RLock()
 	r, ok := h.rooms[roomUUID]
@@ -400,24 +400,20 @@ func (h *Hub) KickClient(roomUUID string, targetUserID, byUserID uint64) {
 	h.mu.RUnlock()
 
 	if !ok {
-		return // пользователь не онлайн — ничего делать не нужно
+		return
 	}
 
-	// Говорим клиенту что он кикнут
 	target.sendMsg(EventPlayerKicked, KickedPayload{
 		RoomUUID: roomUUID,
 		ByUserID: byUserID,
 	})
 
-	// Даём время доставить сообщение до закрытия соединения
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		target.conn.Close()
 	}()
 }
 
-// NotifyRoomDeleted — рассылает всем в комнате событие удаления и закрывает соединения.
-// Вызывается из room handler после удаления комнаты из БД.
 func (h *Hub) NotifyRoomDeleted(roomUUID string) {
 	h.mu.RLock()
 	r, ok := h.rooms[roomUUID]
@@ -431,7 +427,6 @@ func (h *Hub) NotifyRoomDeleted(roomUUID string) {
 	}
 	h.mu.RUnlock()
 
-	// Рассылаем событие всем и даём время доставить до закрытия
 	for _, c := range clients {
 		c.sendMsg(EventRoomDeleted, RoomDeletedPayload{RoomUUID: roomUUID})
 	}
@@ -443,27 +438,23 @@ func (h *Hub) NotifyRoomDeleted(roomUUID string) {
 	}()
 }
 
-// NotifyGameSelected — хост выбрал игру, рассылаем всем в комнате
 func (h *Hub) NotifyGameSelected(roomUUID string, gameType string) {
 	h.broadcastToRoom(roomUUID, "game_selected", map[string]any{
-		"room_uuid":  roomUUID,
-		"game_type":  gameType,
+		"room_uuid": roomUUID,
+		"game_type": gameType,
 	})
 }
 
-// SendToUser — отправляет сообщение конкретному пользователю в комнате
 func (h *Hub) SendToUser(roomUUID string, userID uint64, msgType string, payload any) {
 	h.relayToUser(roomUUID, userID, msgType, payload)
 }
 
-// SetGameManager — устанавливает game manager для уведомлений об отключении
 func (h *Hub) SetGameManager(mgr GameManager) {
 	h.mu.Lock()
 	h.gameMgr = mgr
 	h.mu.Unlock()
 }
 
-// ForceRemovePlayer — убирает игрока из активной игры (при выходе из комнаты или кике)
 func (h *Hub) ForceRemovePlayer(roomUUID string, userID uint64) {
 	h.mu.RLock()
 	mgr := h.gameMgr
@@ -473,7 +464,6 @@ func (h *Hub) ForceRemovePlayer(roomUUID string, userID uint64) {
 	}
 }
 
-// ResetGameNoCtx — сбрасывает игру без контекста (используется при удалении комнаты)
 func (h *Hub) ResetGameNoCtx(roomUUID string) {
 	h.mu.RLock()
 	mgr := h.gameMgr

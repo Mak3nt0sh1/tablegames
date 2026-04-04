@@ -1,0 +1,86 @@
+name: Deploy TableGames
+
+# Запуск деплоя автоматически при push в ветку main
+on:
+  push:
+    branches:
+      - master # Если у тебя ветка называется master, замени main на master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачиваем код из GitHub
+        uses: actions/checkout@v3
+
+      # ==========================================
+      # 1. СБОРКА И ДЕПЛОЙ ФРОНТЕНДА
+      # ==========================================
+      - name: Устанавливаем Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Собираем фронтенд
+        working-directory: ./frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Загружаем фронт на сервер (в /var/www/tablegames)
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: "frontend/dist/*"
+          target: "/var/www/tablegames"
+          strip_components: 2 # Убирает папки "frontend" и "dist" из пути при копировании
+
+      # ==========================================
+      # 2. СБОРКА И ДЕПЛОЙ БЭКЕНДА
+      # ==========================================
+      # GitHub сам скомпилирует Go-код. Это в 10 раз быстрее, чем собирать на самом сервере!
+      - name: Устанавливаем Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Собираем бэкенд
+        working-directory: ./backend
+        run: GOOS=linux GOARCH=amd64 go build -o tablegames ./cmd/server/main.go
+
+      - name: Загружаем бинарник и миграции (в /opt/tablegames)
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: "backend/tablegames,backend/migrations/"
+          target: "/opt/tablegames"
+          strip_components: 1 # Убирает папку "backend" из пути
+
+      # ==========================================
+      # 3. ПРИМЕНЕНИЕ МИГРАЦИЙ И ПЕРЕЗАПУСК
+      # ==========================================
+      - name: Перезапуск сервера
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            cd /opt/tablegames
+            
+            # Выдаем права на исполнение
+            chmod +x tablegames
+            
+            # Применяем миграции
+            goose -dir migrations mysql "app:masterkio2024@tcp(127.0.0.1:3306)/tablegames?parseTime=true" up
+            
+            # Перезапускаем службу
+            systemctl restart tablegames
+            
+            # Ждём пару секунд и проверяем статус (чтобы GitHub показал ошибку, если бэк не поднялся)
+            sleep 2
+            systemctl status tablegames --no-pager

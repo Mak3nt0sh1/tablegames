@@ -53,6 +53,7 @@ type RoomStatePayload struct {
 	MaxPlayers int          `json:"max_players"`
 	Status     string       `json:"status"`
 	Players    []PlayerInfo `json:"players"`
+	VoiceUsers []PlayerInfo `json:"voice_users"` // <--- Добавили список войса
 }
 
 // PlayerJoinedPayload — кто подключился

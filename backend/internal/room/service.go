@@ -25,7 +25,7 @@ var (
 	ErrUnsupportedGame = errors.New("unsupported game type")
 )
 
-// SupportedGames — список поддерживаемых игр (дублируем чтобы не импортировать game пакет)
+// SupportedGames — список поддерживаемых игр
 var supportedGames = map[string]bool{"uno": true}
 
 type Service struct {
@@ -78,7 +78,6 @@ func (s *Service) IsMember(ctx context.Context, roomID, userID uint64) (bool, er
 	return err == nil, nil
 }
 
-// UpdateRoom — хост меняет настройки комнаты
 func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64, name string, maxPlayers int, password *string, gameType string) (*models.Room, error) {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {
@@ -100,7 +99,6 @@ func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64
 	if name != "" {
 		room.Name = name
 	}
-	// password: nil = не менять, "" = убрать пароль, "xxx" = установить новый
 	if password != nil {
 		if *password == "" {
 			room.PasswordHash = nil
@@ -125,7 +123,6 @@ func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64
 	return room, nil
 }
 
-// LeaveRoom — игрок добровольно выходит из комнаты
 func (s *Service) LeaveRoom(ctx context.Context, roomUUID string, userID uint64) error {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {
@@ -137,7 +134,6 @@ func (s *Service) LeaveRoom(ctx context.Context, roomUUID string, userID uint64)
 	return s.repo.RemoveMember(ctx, room.ID, userID)
 }
 
-// KickPlayer — хост кикает игрока
 func (s *Service) KickPlayer(ctx context.Context, roomUUID string, hostID, targetUserID uint64) error {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {
@@ -156,7 +152,6 @@ func (s *Service) KickPlayer(ctx context.Context, roomUUID string, hostID, targe
 	return s.repo.RemoveMember(ctx, room.ID, targetUserID)
 }
 
-// DeleteRoom — хост удаляет комнату
 func (s *Service) DeleteRoom(ctx context.Context, roomUUID string, hostID uint64) error {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {
@@ -227,7 +222,6 @@ func (s *Service) CreateInviteLink(ctx context.Context, roomUUID string, hostID 
 }
 
 func (s *Service) joinRoom(ctx context.Context, userID uint64, room *models.Room) (*models.Room, error) {
-	// Если уже член комнаты — разрешаем всегда (реконнект)
 	if s.repo.IsMemberDirect(ctx, room.ID, userID) {
 		return room, nil
 	}
@@ -261,7 +255,6 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(b), err
 }
 
-// SaveGameResults — сохраняет результаты игры для всех участников
 func (s *Service) SaveGameResults(ctx context.Context, roomID uint64, gameType string, winnerID uint64, scores map[uint64]int) error {
 	for userID, score := range scores {
 		result := "lose"
@@ -285,7 +278,8 @@ func (s *Service) GetUserRoom(ctx context.Context, userID uint64) (*models.Room,
 		if err != nil {
 			continue
 		}
-		if room.Status == "waiting" || room.Status == "playing" {
+		// ИСПРАВЛЕНИЕ ЗДЕСЬ: Возвращаем комнату, даже если игра завершена
+		if room.Status == "waiting" || room.Status == "playing" || room.Status == "finished" {
 			return room, nil
 		}
 	}

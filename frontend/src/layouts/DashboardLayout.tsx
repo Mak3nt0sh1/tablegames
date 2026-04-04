@@ -1,11 +1,34 @@
+import { useState, useEffect } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Gamepad2, User, Settings as SettingsIcon, LogOut, BookOpen} from "lucide-react";
-import { auth } from "../api/client";
+import { auth, rooms, game } from "../api/client";
+import type { Room } from "../types";
 
 export default function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentUser = auth.me();
+
+  const [activeGame, setActiveGame] = useState<{ room_uuid: string } | null>(null);
+  const [myRoom, setMyRoom] = useState<Room | null>(null);
+
+  useEffect(() => {
+    const fetchState = () => {
+      game.activeGame().then((res) => {
+        setActiveGame(res.active && res.room_uuid ? { room_uuid: res.room_uuid } : null);
+      }).catch(() => setActiveGame(null));
+
+      rooms.my().then((res) => {
+        setMyRoom(res.room || null);
+      }).catch(() => setMyRoom(null));
+    };
+
+    fetchState();
+    
+    // Интервал для гарантированного обновления виджетов
+    const interval = setInterval(fetchState, 5000);
+    return () => clearInterval(interval);
+  }, [location.pathname]);
 
   const handleLogout = () => {
     auth.logout();
@@ -18,6 +41,9 @@ export default function DashboardLayout() {
     { path: "/rules", label: "Правила игр", icon: <BookOpen size={20} /> },
     { path: "/settings", label: "Настройки", icon: <SettingsIcon size={20} /> }
   ];
+
+  const isCurrentRoom = myRoom && location.pathname === `/${myRoom.uuid}`;
+  const isCurrentGame = activeGame && location.pathname === `/${activeGame.room_uuid}/game`;
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100 font-sans overflow-hidden">
@@ -67,7 +93,43 @@ export default function DashboardLayout() {
           </div>
         </header>
 
-        <main className="flex-1 p-8 overflow-y-auto">
+        <main className="flex-1 p-8 overflow-y-auto flex flex-col gap-6">
+          
+          {/* Виджет Комнаты */}
+          {myRoom && !activeGame && !isCurrentRoom && (
+            <div className="bg-gray-900 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between shrink-0">
+              <div>
+                <p className="text-white font-bold">Хотите вернуться в: {myRoom.name}</p>
+                <p className="text-gray-400 text-sm mt-1">
+                  {myRoom.status === 'waiting' ? 'Ожидание игроков' : myRoom.status === 'playing' ? 'Игра идёт' : 'Игра завершена'} 
+                  · Код: <span className="font-mono text-indigo-400">{myRoom.invite_code}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => navigate(`/${myRoom.uuid}`)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors shrink-0"
+              >
+                Вернуться
+              </button>
+            </div>
+          )}
+
+          {/* Виджет Игры */}
+          {activeGame && !isCurrentGame && (
+            <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between shrink-0">
+              <div>
+                <p className="text-indigo-400 font-bold">У вас есть активная игра!</p>
+                <p className="text-gray-400 text-sm mt-1">Игра ждёт вашего хода</p>
+              </div>
+              <button
+                onClick={() => navigate(`/${activeGame.room_uuid}/game`)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors shrink-0"
+              >
+                Вернуться
+              </button>
+            </div>
+          )}
+
           <Outlet />
         </main>
       </div>

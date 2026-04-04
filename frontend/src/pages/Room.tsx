@@ -10,7 +10,7 @@ import VoiceMini from '../components/VoiceMini';
 import { useVoice } from '../context/VoiceContext';
 import { useWebSocket } from '../hooks/useWebSocket';
 import type { Room as RoomType } from '../types';
-import type { RoomStatePayload, ChatPayload} from '../types';
+import type { RoomStatePayload, ChatPayload } from '../types';
 
 interface Player {
   user_id: number;
@@ -32,18 +32,13 @@ export default function Room() {
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
 
-  // Чат
   const [messages, setMessages] = useState<Array<ChatPayload & { id: number }>>([]);
   const msgIdRef = useRef(0);
-
-  // Голосовой чат
-
 
   const isHost = room?.host_id === me?.id;
   const { play } = useSound();
   const { notify } = useNotifications();
 
-  // Загружаем данные комнаты — если не в комнате, автоматически вступаем
   useEffect(() => {
     if (!roomId) return;
     const init = async () => {
@@ -52,25 +47,15 @@ export default function Room() {
         setRoom(r);
         setSelectedGame(r.game_type || '');
 
-        // Если комната в статусе playing — проверяем реальный статус игры в менеджере
         if (r.status === 'playing') {
           try {
             const gameStatus = await game.status(roomId);
             if (gameStatus.status === 'finished' || gameStatus.status === 'none') {
-              // Игра завершилась или не существует — сбрасываем
               await game.reset(roomId);
               setRoom((prev) => prev ? { ...prev, status: 'waiting' } : prev);
             }
-          } catch {
-            // Если /game/status недоступен — оставляем как есть
-          }
+          } catch {}
         }
-        if (r.status === 'finished') {
-          // Уже finished — просто показываем кнопку "Новая игра"
-          // ничего дополнительно делать не нужно
-        }
-
-
       } catch {
         navigate('/');
       } finally {
@@ -80,35 +65,14 @@ export default function Room() {
     init();
   }, [roomId, location.key]);
 
-  // Авто-вход в войс если включено в настройках
-  const voiceChatRef = useRef<{ handleJoin: () => void } | null>(null);
-  useEffect(() => {
-    if (!loading && getSettings().voiceAutoJoin) {
-      // Небольшая задержка чтобы WS успел подключиться
-      setTimeout(() => voiceChatRef.current?.handleJoin(), 1500);
-    }
-  }, [loading]);
-
-  // Обновляем статус комнаты при возврате на страницу (после выхода из игры)
-  useEffect(() => {
-    const handleFocus = () => {
-      if (roomId) {
-        rooms.get(roomId).then((r) => {
-          setRoom(r);
-          setSelectedGame(r.game_type || '');
-        }).catch(() => {});
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [roomId]);
-
-  // WebSocket — реалтайм обновления
-  const { setVoiceUsers, handleOffer, handleAnswer, handleIce, initPeer, leave: leaveVoice } = useVoice();
+  const { setVoiceUsers, handleOffer, handleAnswer, handleIce, initPeer, leave: leaveVoice, join: joinVoice } = useVoice();
 
   const { sendChat, sendVoiceJoin, sendVoiceLeave, sendVoiceOffer, sendVoiceAnswer, sendVoiceIce } = useWebSocket(roomId ?? null, {
     onRoomState: (payload: RoomStatePayload) => {
       setPlayers(payload.players);
+      if (payload.voice_users) {
+        setVoiceUsers(payload.voice_users.map(u => ({ user_id: u.user_id, username: u.username })));
+      }
     },
     onPlayerJoined: (payload) => {
       setPlayers((prev) => {
@@ -150,6 +114,9 @@ export default function Room() {
       leaveVoice();
       navigate('/');
     },
+    onChatHistory: (payload) => {
+      setMessages(payload.map((msg) => ({ ...msg, id: ++msgIdRef.current })));
+    },
     onChatBroadcast: (payload) => {
       setMessages((prev) => [...prev, { ...payload, id: ++msgIdRef.current }]);
       if (payload.user_id !== me?.id) {
@@ -159,16 +126,27 @@ export default function Room() {
     },
     onVoiceUserJoined: (payload) => {
       const user = { user_id: payload.user_id, username: payload.username };
-      setVoiceUsers((prev) => prev.find((u) => u.user_id === user.user_id) ? prev : [...prev, user]);
-      initPeer(payload.user_id, sendVoiceOffer, sendVoiceIce).catch(console.error);
+      setVoiceUsers((prev) => prev.find((u) => Number(u.user_id) === Number(user.user_id)) ? prev : [...prev, user]);
+      // ИСПРАВЛЕНИЕ: Не звоним сами себе!
+      if (Number(payload.user_id) !== Number(me?.id)) {
+        initPeer(payload.user_id, sendVoiceOffer, sendVoiceIce).catch(console.error);
+      }
     },
     onVoiceUserLeft: (payload) => {
-      setVoiceUsers((prev) => prev.filter((u) => u.user_id !== payload.user_id));
+      setVoiceUsers((prev) => prev.filter((u) => Number(u.user_id) !== Number(payload.user_id)));
     },
     onVoiceOffer: (payload: any) => handleOffer(payload.from_user_id, payload.sdp, sendVoiceAnswer, sendVoiceIce),
     onVoiceAnswer: (payload: any) => handleAnswer(payload.from_user_id, payload.sdp),
     onVoiceIceCandidate: (payload: any) => handleIce(payload.from_user_id, payload.candidate, payload.sdp_mid, payload.sdp_mline_index),
   });
+
+  useEffect(() => {
+    if (!loading && getSettings().voiceAutoJoin) {
+      setTimeout(() => {
+        joinVoice().then(() => sendVoiceJoin()).catch(() => {});
+      }, 1500);
+    }
+  }, [loading, joinVoice, sendVoiceJoin]);
 
   const inviteLink = `${window.location.origin}/join/${room?.invite_code ?? ''}`;
 
@@ -178,7 +156,6 @@ export default function Room() {
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  // Хост выбирает игру
   const handleSelectGame = async (gameType: string) => {
     if (!roomId || !isHost) return;
     setSelectedGame(gameType);
@@ -189,7 +166,6 @@ export default function Room() {
     }
   };
 
-  // Старт игры
   const handleStartGame = async () => {
     if (!roomId || !selectedGame) return;
     setStarting(true);
@@ -202,27 +178,22 @@ export default function Room() {
     }
   };
 
-  // Выйти из комнаты
   const handleLeave = async () => {
     if (!roomId) return;
     try {
       if (isHost) {
         await rooms.delete(roomId);
-        leaveVoice();
-        navigate('/');
       } else {
         await rooms.leave(roomId);
-        leaveVoice();
-        navigate('/');
       }
     } catch (e: unknown) {
-      // Если уже вышли или комната удалена — всё равно редиректим
       console.error('Leave error:', e);
+    } finally {
+      leaveVoice();
       navigate('/');
     }
   };
 
-  // Кикнуть игрока
   const handleKick = async (userId: number) => {
     if (!roomId) return;
     try {
@@ -254,7 +225,6 @@ export default function Room() {
           </p>
         )}
 
-        {/* Инвайт блок */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             <UserPlus size={20} className="text-indigo-400" />
@@ -281,7 +251,6 @@ export default function Room() {
           </p>
         </div>
 
-        {/* Список игроков */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 min-h-[300px]">
           <h3 className="text-lg font-bold text-white mb-4">
             Игроки ({players.length}/{room.max_players})
@@ -323,7 +292,6 @@ export default function Room() {
               </div>
             ))}
 
-            {/* Пустые слоты */}
             {Array.from({ length: room.max_players - players.length }).map((_, i) => (
               <div
                 key={i}
@@ -335,7 +303,6 @@ export default function Room() {
             ))}
           </div>
         </div>
-      {/* Чат — показываем только если включено в настройках */}
         {getSettings().chatVisible && <Chat
           messages={messages}
           currentUserId={me?.id ?? 0}
@@ -399,14 +366,12 @@ export default function Room() {
           </div>
         </div>
 
-        {/* Голосовой чат */}
         <VoiceMini
           onJoinWs={sendVoiceJoin}
           onLeaveWs={sendVoiceLeave}
         />
 
         <div className="space-y-3 mt-6">
-          {/* Игра идёт — кнопки вернуться и завершить */}
           {room?.status === 'playing' && isHost && (
             <button
               onClick={async () => {
@@ -428,7 +393,6 @@ export default function Room() {
             </button>
           )}
 
-          {/* Игра завершена — кнопка новой игры (только хост) */}
           {room?.status === 'finished' && isHost && (
             <button
               onClick={async () => {
@@ -450,7 +414,6 @@ export default function Room() {
             </button>
           )}
 
-          {/* Ожидание — кнопка старта (только хост) */}
           {room?.status === 'waiting' && isHost && (
             <button
               onClick={handleStartGame}

@@ -1,7 +1,4 @@
-// src/types/api.ts
-// Типы точно соответствующие нашему бэкенду
-
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// src/types/index.ts
 
 export interface LoginRequest {
   email: string;
@@ -25,8 +22,6 @@ export interface User {
   avatar_url?: string;
   created_at: string;
 }
-
-// ── Room ──────────────────────────────────────────────────────────────────────
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
 export type GameType = 'uno';
@@ -54,15 +49,13 @@ export interface CreateRoomRequest {
 export interface UpdateRoomRequest {
   name?: string;
   max_players?: number;
-  password?: string | null; // null = убрать пароль
+  password?: string | null;
   game_type?: GameType;
 }
 
 export interface JoinByCodeRequest {
   password?: string;
 }
-
-// ── Game ──────────────────────────────────────────────────────────────────────
 
 export type CardColor = 'red' | 'green' | 'blue' | 'yellow';
 export type CardValue =
@@ -96,8 +89,6 @@ export interface GameState {
   your_hand: Card[];
 }
 
-// ── WebSocket Events ──────────────────────────────────────────────────────────
-
 export interface WsMessage<T = unknown> {
   type: string;
   payload: T;
@@ -110,6 +101,7 @@ export interface RoomStatePayload {
   max_players: number;
   status: RoomStatus;
   players: Array<{ user_id: number; username: string; role: 'host' | 'player' }>;
+  voice_users: Array<{ user_id: number; username: string }>;
 }
 
 export interface PlayerJoinedPayload {
@@ -179,8 +171,6 @@ export interface UnoChallengePayload {
   cards_drawn: number;
   players: GamePlayer[];
 }
-
-// ── API Error ─────────────────────────────────────────────────────────────────
 
 export interface ApiError {
   error: string;

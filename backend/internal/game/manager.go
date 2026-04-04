@@ -500,6 +500,15 @@ func (m *Manager) ForceRemovePlayer(roomUUID string, userID uint64) {
 		}
 	}
 
+	// Убираем из массива игроков (ИСПРАВЛЕНО)
+	newPlayers := make([]uno.PlayerState, 0)
+	for _, p := range s.Players {
+		if p.UserID != userID {
+			newPlayers = append(newPlayers, p)
+		}
+	}
+	s.Players = newPlayers
+
 	if len(newOrder) == 0 {
 		// Все ушли — просто чистим
 		m.mu.Unlock()

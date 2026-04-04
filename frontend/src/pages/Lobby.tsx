@@ -1,27 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Users, Plus, LogIn } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { rooms, join, game as gameApi } from '../api/client';
-import type { Room } from '../types';
+import { useNavigate } from 'react-router-dom';
+import { rooms, join } from '../api/client';
 
 export default function Lobby() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [joinCode, setJoinCode] = useState('');
-  const [activeGame, setActiveGame] = useState<{ room_uuid: string } | null>(null);
-  const [myRoom, setMyRoom] = useState<Room | null>(null);
-
-  useEffect(() => {
-    gameApi.activeGame().then((res) => {
-      if (res.active && res.room_uuid) setActiveGame({ room_uuid: res.room_uuid });
-    }).catch(() => {});
-    // Проверяем есть ли у пользователя активная комната
-    rooms.my().then((res) => {
-      if (res.room) setMyRoom(res.room);
-    }).catch(() => {});
-  }, [location.key]);
 
   // Создать комнату
   const handleCreateRoom = async () => {
@@ -54,38 +40,6 @@ export default function Lobby() {
 
   return (
     <div className="space-y-6">
-      {/* Виджет текущей комнаты */}
-      {myRoom && !activeGame && (
-        <div className="bg-gray-900 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between">
-          <div>
-            <p className="text-white font-bold">Хотите вернуться в: {myRoom.name}</p>
-            <p className="text-gray-400 text-sm mt-1">
-              {myRoom.status === 'waiting' ? 'Ожидание игроков' : 'Игра идёт'} · Код: <span className="font-mono text-indigo-400">{myRoom.invite_code}</span>
-            </p>
-          </div>
-          <button
-            onClick={() => navigate(`/${myRoom.uuid}`)}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors"
-          >
-            Вернуться
-          </button>
-        </div>
-      )}
-
-      {activeGame && (
-        <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between">
-          <div>
-            <p className="text-indigo-400 font-bold">У вас есть активная игра!</p>
-            <p className="text-gray-400 text-sm mt-1">Игра ждёт вашего хода</p>
-          </div>
-          <button
-            onClick={() => navigate(`/${activeGame.room_uuid}/game`)}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors"
-          >
-            Вернуться
-          </button>
-        </div>
-      )}
       {error && (
         <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
           {error}
@@ -93,7 +47,6 @@ export default function Lobby() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-
         {/* Создать комнату */}
         <button
           onClick={handleCreateRoom}

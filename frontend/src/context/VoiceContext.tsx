@@ -1,7 +1,3 @@
-// src/context/VoiceContext.tsx
-// Глобальный контекст голосового чата — живёт на уровне App
-// чтобы войс не прерывался при переходе между Room и UnoGame
-
 import { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
 
 interface VoiceUser {
@@ -76,6 +72,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       localStreamRef.current = stream;
       setIsInVoice(true);
       isInVoiceRef.current = true;
+      setIsMuted(false);
     } catch {
       setError('Нет доступа к микрофону');
     }
@@ -90,19 +87,20 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     audioRefs.current.clear();
     setIsInVoice(false);
     isInVoiceRef.current = false;
-    setVoiceUsers([]);
+    setIsMuted(false);
+    // ИСПРАВЛЕНИЕ: Мы БОЛЬШЕ НЕ ОЧИЩАЕМ setVoiceUsers([]). 
+    // Потому что если мы вышли, остальные всё ещё сидят там, и мы должны их видеть!
   }, []);
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       localStreamRef.current?.getAudioTracks().forEach((t) => {
-        t.enabled = prev; // если был muted — включаем
+        t.enabled = prev;
       });
       return !prev;
     });
   }, []);
 
-  // Инициируем соединение с новым игроком (мы отправляем offer)
   const initPeer = useCallback(async (
     targetUserId: number,
     onOffer: (targetId: number, sdp: string) => void,
@@ -114,7 +112,6 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     onOffer(targetUserId, offer.sdp!);
   }, [createPeer]);
 
-  // Обработка входящего offer (нам прислали — отвечаем answer)
   const handleOffer = useCallback((
     fromUserId: number,
     sdp: string,
@@ -142,7 +139,6 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     pc?.addIceCandidate({ candidate, sdpMid, sdpMLineIndex: sdpMlineIndex }).catch(console.error);
   }, []);
 
-  // Останавливаем всё при уходе со страницы (закрытие вкладки)
   useEffect(() => {
     return () => {
       if (isInVoiceRef.current) leave();
