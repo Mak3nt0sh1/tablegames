@@ -22,7 +22,35 @@ interface VoiceContextValue {
 
 const VoiceContext = createContext<VoiceContextValue | null>(null);
 
-const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const ICE_SERVERS = {
+  iceServers: [
+    // Оставляем бесплатный STUN от Google (он быстрый и надежный)
+    { urls: 'stun:stun.l.google.com:19302' },
+    // STUN от Metered
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    // TURN-сервера (для обхода NAT и файрволов)
+    {
+      urls: 'turn:global.relay.metered.ca:80',
+      username: '284f71e9162a1b2df3023c67',
+      credential: 'pBVMYCMAYMxEwsAs',
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+      username: '284f71e9162a1b2df3023c67',
+      credential: 'pBVMYCMAYMxEwsAs',
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:443',
+      username: '284f71e9162a1b2df3023c67',
+      credential: 'pBVMYCMAYMxEwsAs',
+    },
+    {
+      urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+      username: '284f71e9162a1b2df3023c67',
+      credential: 'pBVMYCMAYMxEwsAs',
+    },
+  ],
+};
 
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [isInVoice, setIsInVoice] = useState(false);
