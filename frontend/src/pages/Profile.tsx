@@ -84,13 +84,13 @@ export default function Profile() {
     );
   }
 
-  // const avatarUrl = data?.avatar_url
-  //   ? `http://localhost:8080${data.avatar_url}`
-  //   : null;
-
   const avatarUrl = data?.avatar_url
-  ? `${import.meta.env.VITE_API_URL}${data.avatar_url}`
-  : null;
+    ? `http://localhost:8080${data.avatar_url}`
+    : null;
+
+  // const avatarUrl = data?.avatar_url
+  // ? `${import.meta.env.VITE_API_URL}${data.avatar_url}`
+  // : null;
 
   return (
     <div className="max-w-2xl space-y-6">
