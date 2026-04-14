@@ -22,7 +22,7 @@ type Hub interface {
 	ForceRemovePlayer(roomUUID string, userID uint64)
 	ResetGameNoCtx(roomUUID string)
 	NotifyHostChanged(roomUUID string, newHostID uint64)
-	NotifyPlayerLeft(roomUUID string, userID uint64) // Вызываем руками из хендлера
+	NotifyPlayerLeft(roomUUID string, userID uint64)
 }
 
 func NewHandler(svc *Service, hub Hub) *Handler {
@@ -49,6 +49,11 @@ func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	room, err := h.svc.CreateRoom(r.Context(), userID, req.Name, req.MaxPlayers, req.Password)
 	if err != nil {
+		// ИСПРАВЛЕНИЕ: Передаём наш кастомный текст ошибки на фронтенд вместо безликого 500
+		if err.Error() == "у вас уже есть активная комната. Покиньте её перед созданием новой" {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "server error")
 		return
 	}
@@ -172,8 +177,6 @@ func (h *Handler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.hub.ForceRemovePlayer(uuid, userID)
-
-	// Убираем из лобби только по явной команде выхода
 	h.hub.NotifyPlayerLeft(uuid, userID)
 
 	if roomDeleted {
@@ -211,8 +214,6 @@ func (h *Handler) KickPlayer(w http.ResponseWriter, r *http.Request) {
 
 	h.hub.KickClient(uuid, req.UserID, hostID)
 	h.hub.ForceRemovePlayer(uuid, req.UserID)
-
-	// Уведомляем лобби, что игрока кикнули
 	h.hub.NotifyPlayerLeft(uuid, req.UserID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "kicked"})
