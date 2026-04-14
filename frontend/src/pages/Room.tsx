@@ -69,7 +69,18 @@ export default function Room() {
 
   const { sendChat, sendVoiceJoin, sendVoiceLeave, sendVoiceOffer, sendVoiceAnswer, sendVoiceIce } = useWebSocket(roomId ?? null, {
     onRoomState: (payload: RoomStatePayload) => {
+      // Обновляем список игроков
       setPlayers(payload.players);
+      
+      // ИСПРАВЛЕНИЕ ЗДЕСЬ: Обязательно обновляем параметры комнаты (включая нового host_id), 
+      // чтобы у нового хоста моментально появились кнопки управления
+      setRoom((prev) => prev ? { 
+        ...prev, 
+        host_id: payload.host_id, 
+        max_players: payload.max_players,
+        status: payload.status 
+      } : prev);
+
       if (payload.voice_users) {
         setVoiceUsers(payload.voice_users.map(u => ({ user_id: u.user_id, username: u.username })));
       }
@@ -177,7 +188,6 @@ export default function Room() {
     }
   };
 
-  // Выйти из комнаты (передаст права если это хост)
   const handleLeave = async () => {
     if (!roomId) return;
     try {
@@ -190,7 +200,6 @@ export default function Room() {
     }
   };
 
-  // Удалить комнату (только для хоста)
   const handleDeleteRoom = async () => {
     if (!roomId) return;
     try {
