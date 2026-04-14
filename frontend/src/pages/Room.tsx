@@ -127,7 +127,6 @@ export default function Room() {
     onVoiceUserJoined: (payload) => {
       const user = { user_id: payload.user_id, username: payload.username };
       setVoiceUsers((prev) => prev.find((u) => Number(u.user_id) === Number(user.user_id)) ? prev : [...prev, user]);
-      // ИСПРАВЛЕНИЕ: Не звоним сами себе!
       if (Number(payload.user_id) !== Number(me?.id)) {
         initPeer(payload.user_id, sendVoiceOffer, sendVoiceIce).catch(console.error);
       }
@@ -178,16 +177,26 @@ export default function Room() {
     }
   };
 
+  // Выйти из комнаты (передаст права если это хост)
   const handleLeave = async () => {
     if (!roomId) return;
     try {
-      if (isHost) {
-        await rooms.delete(roomId);
-      } else {
-        await rooms.leave(roomId);
-      }
+      await rooms.leave(roomId);
     } catch (e: unknown) {
       console.error('Leave error:', e);
+    } finally {
+      leaveVoice();
+      navigate('/');
+    }
+  };
+
+  // Удалить комнату (только для хоста)
+  const handleDeleteRoom = async () => {
+    if (!roomId) return;
+    try {
+      await rooms.delete(roomId);
+    } catch (e: unknown) {
+      console.error('Delete error:', e);
     } finally {
       leaveVoice();
       navigate('/');
@@ -215,10 +224,7 @@ export default function Room() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-      {/* Левая колонка */}
       <div className="lg:col-span-2 space-y-6">
-
         {error && (
           <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
             {error}
@@ -310,7 +316,6 @@ export default function Room() {
         />}
       </div>
 
-      {/* Правая колонка */}
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col">
         <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
           <Settings size={20} className="text-gray-400" />
@@ -425,13 +430,24 @@ export default function Room() {
             </button>
           )}
 
-          <button
-            onClick={handleLeave}
-            className="w-full bg-gray-800 hover:bg-red-500/20 hover:text-red-400 text-gray-400 font-medium rounded-xl px-4 py-3 transition-colors flex items-center justify-center gap-2"
-          >
-            <LogOut size={18} />
-            {isHost ? 'Закрыть комнату' : 'Покинуть комнату'}
-          </button>
+          <div className="flex gap-3 pt-2 border-t border-gray-800">
+            <button
+              onClick={handleLeave}
+              className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-medium rounded-xl px-4 py-3 transition-colors flex items-center justify-center gap-2"
+            >
+              <LogOut size={18} />
+              Покинуть
+            </button>
+
+            {isHost && (
+              <button
+                onClick={handleDeleteRoom}
+                className="flex-1 bg-red-600/20 hover:bg-red-500/30 text-red-400 font-medium rounded-xl px-4 py-3 transition-colors flex items-center justify-center gap-2 border border-red-500/30"
+              >
+                Удалить
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

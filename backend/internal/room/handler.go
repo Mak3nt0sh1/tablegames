@@ -15,21 +15,20 @@ type Handler struct {
 	hub Hub
 }
 
-// Hub — минимальный интерфейс от ws.Hub нужный room handler'у
 type Hub interface {
 	KickClient(roomUUID string, targetUserID, byUserID uint64)
 	NotifyRoomDeleted(roomUUID string)
 	NotifyGameSelected(roomUUID string, gameType string)
 	ForceRemovePlayer(roomUUID string, userID uint64)
 	ResetGameNoCtx(roomUUID string)
-	NotifyHostChanged(roomUUID string, newHostID uint64) // Добавлено для передачи хоста
+	NotifyHostChanged(roomUUID string, newHostID uint64)
+	NotifyPlayerLeft(roomUUID string, userID uint64) // Вызываем руками из хендлера
 }
 
 func NewHandler(svc *Service, hub Hub) *Handler {
 	return &Handler{svc: svc, hub: hub}
 }
 
-// CreateRoom — POST /api/rooms
 func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uint64)
 	var req struct {
@@ -56,7 +55,6 @@ func (h *Handler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toRoomJSON(room))
 }
 
-// GetRoom — GET /api/rooms/{uuid}
 func (h *Handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 	uuid := chi.URLParam(r, "uuid")
 	room, err := h.svc.GetRoom(r.Context(), uuid)
@@ -67,7 +65,6 @@ func (h *Handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toRoomJSON(room))
 }
 
-// UpdateRoom — PATCH /api/rooms/{uuid}
 func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	hostID := r.Context().Value(middleware.UserIDKey).(uint64)
 	uuid := chi.URLParam(r, "uuid")
@@ -99,7 +96,6 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toRoomJSON(room))
 }
 
-// DeleteRoom — DELETE /api/rooms/{uuid}
 func (h *Handler) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 	hostID := r.Context().Value(middleware.UserIDKey).(uint64)
 	uuid := chi.URLParam(r, "uuid")
@@ -116,7 +112,6 @@ func (h *Handler) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// CreateInviteLink — POST /api/rooms/{uuid}/invite
 func (h *Handler) CreateInviteLink(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uint64)
 	uuid := chi.URLParam(r, "uuid")
@@ -132,7 +127,6 @@ func (h *Handler) CreateInviteLink(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"invite_link": link})
 }
 
-// JoinByCode — POST /api/join/code/{code}
 func (h *Handler) JoinByCode(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uint64)
 	code := chi.URLParam(r, "code")
@@ -152,7 +146,6 @@ func (h *Handler) JoinByCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toRoomJSON(room))
 }
 
-// JoinByToken — POST /api/join/token/{token}
 func (h *Handler) JoinByToken(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uint64)
 	token := chi.URLParam(r, "token")
@@ -164,7 +157,6 @@ func (h *Handler) JoinByToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toRoomJSON(room))
 }
 
-// LeaveRoom — DELETE /api/rooms/{uuid}/leave
 func (h *Handler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uint64)
 	uuid := chi.URLParam(r, "uuid")
@@ -179,10 +171,11 @@ func (h *Handler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Убираем из активной игры если идёт
 	h.hub.ForceRemovePlayer(uuid, userID)
 
-	// Оповещаем WebSocket если комната удалилась или передали права
+	// Убираем из лобби только по явной команде выхода
+	h.hub.NotifyPlayerLeft(uuid, userID)
+
 	if roomDeleted {
 		h.hub.ResetGameNoCtx(uuid)
 		h.hub.NotifyRoomDeleted(uuid)
@@ -193,7 +186,6 @@ func (h *Handler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
 }
 
-// KickPlayer — POST /api/rooms/{uuid}/kick
 func (h *Handler) KickPlayer(w http.ResponseWriter, r *http.Request) {
 	hostID := r.Context().Value(middleware.UserIDKey).(uint64)
 	uuid := chi.URLParam(r, "uuid")
@@ -216,8 +208,13 @@ func (h *Handler) KickPlayer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	h.hub.KickClient(uuid, req.UserID, hostID)
 	h.hub.ForceRemovePlayer(uuid, req.UserID)
+
+	// Уведомляем лобби, что игрока кикнули
+	h.hub.NotifyPlayerLeft(uuid, req.UserID)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "kicked"})
 }
 

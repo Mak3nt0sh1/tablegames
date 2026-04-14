@@ -3,10 +3,8 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"sync"
-	"time"
 )
 
 type incomingMessage struct {
@@ -32,13 +30,12 @@ type GameManager interface {
 }
 
 type Hub struct {
-	mu          sync.RWMutex
-	rooms       map[string]*wsRoom
-	pendingLeft map[string]*time.Timer
-	gameMgr     GameManager
-	register    chan *registerRequest
-	unregister  chan *Client
-	incoming    chan *incomingMessage
+	mu         sync.RWMutex
+	rooms      map[string]*wsRoom
+	gameMgr    GameManager
+	register   chan *registerRequest
+	unregister chan *Client
+	incoming   chan *incomingMessage
 }
 
 type registerRequest struct {
@@ -56,11 +53,10 @@ type RoomMeta struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		rooms:       make(map[string]*wsRoom),
-		pendingLeft: make(map[string]*time.Timer),
-		register:    make(chan *registerRequest, 64),
-		unregister:  make(chan *Client, 64),
-		incoming:    make(chan *incomingMessage, 256),
+		rooms:      make(map[string]*wsRoom),
+		register:   make(chan *registerRequest, 64),
+		unregister: make(chan *Client, 64),
+		incoming:   make(chan *incomingMessage, 256),
 	}
 }
 
@@ -92,6 +88,8 @@ func (h *Hub) handleRegister(req *registerRequest) {
 		}
 		h.rooms[req.roomMeta.UUID] = r
 	}
+	// Проверяем, был ли игрок уже в мапе сокетов, чтобы не спамить уведомлениями при F5
+	_, alreadyIn := r.clients[req.client.UserID]
 	r.clients[req.client.UserID] = req.client
 	h.mu.Unlock()
 
@@ -106,18 +104,21 @@ func (h *Hub) handleRegister(req *registerRequest) {
 		req.client.sendMsg("chat_history", history)
 	}
 
-	role := "player"
-	if req.client.UserID == r.hostID {
-		role = "host"
+	// Отправляем уведомление "Игрок присоединился" только если это новое подключение
+	if !alreadyIn {
+		role := "player"
+		if req.client.UserID == r.hostID {
+			role = "host"
+		}
+		h.broadcastExcept(r, req.client.UserID, EventPlayerJoined, PlayerJoinedPayload{
+			Player: PlayerInfo{
+				UserID:   req.client.UserID,
+				Username: req.client.Username,
+				Role:     role,
+			},
+			Total: len(r.clients),
+		})
 	}
-	h.broadcastExcept(r, req.client.UserID, EventPlayerJoined, PlayerJoinedPayload{
-		Player: PlayerInfo{
-			UserID:   req.client.UserID,
-			Username: req.client.Username,
-			Role:     role,
-		},
-		Total: len(r.clients),
-	})
 }
 
 func (h *Hub) handleUnregister(client *Client) {
@@ -128,66 +129,20 @@ func (h *Hub) handleUnregister(client *Client) {
 		return
 	}
 
-	if currentClient, ok := r.clients[client.UserID]; ok {
-		if currentClient != client {
-			h.mu.Unlock()
-			return
-		}
-	}
-
-	delete(r.clients, client.UserID)
 	wasInVoice := r.voiceClients[client.UserID]
+	if wasInVoice {
+		delete(r.voiceClients, client.UserID)
+	}
 	h.mu.Unlock()
 
 	log.Printf("ws: user=%d (%s) connection dropped room=%s", client.UserID, client.Username, client.RoomUUID)
 
-	key := client.RoomUUID + ":" + fmt.Sprintf("%d", client.UserID)
-	h.mu.Lock()
-	if t, ok := h.pendingLeft[key]; ok {
-		t.Stop()
-	}
-
-	h.pendingLeft[key] = time.AfterFunc(3*time.Second, func() {
-		h.mu.Lock()
-		delete(h.pendingLeft, key)
-		r2, exists := h.rooms[client.RoomUUID]
-		if !exists {
-			h.mu.Unlock()
-			return
-		}
-		if _, reconnected := r2.clients[client.UserID]; reconnected {
-			h.mu.Unlock()
-			return
-		}
-
-		empty := len(r2.clients) == 0
-
-		if wasInVoice {
-			delete(r2.voiceClients, client.UserID)
-		}
-		h.mu.Unlock()
-
-		if empty {
-			h.mu.Lock()
-			delete(h.rooms, client.RoomUUID)
-			h.mu.Unlock()
-			log.Printf("ws: room=%s closed (no players)", client.RoomUUID)
-			return
-		}
-
-		if wasInVoice {
-			h.broadcastToRoom(client.RoomUUID, EventVoiceUserLeft, VoiceUserPayload{
-				UserID:   client.UserID,
-				Username: client.Username,
-			})
-		}
-		h.broadcastToRoom(client.RoomUUID, EventPlayerLeft, PlayerLeftPayload{
+	if wasInVoice {
+		h.broadcastToRoom(client.RoomUUID, EventVoiceUserLeft, VoiceUserPayload{
 			UserID:   client.UserID,
 			Username: client.Username,
-			Total:    len(r2.clients),
 		})
-	})
-	h.mu.Unlock()
+	}
 }
 
 func (h *Hub) handleIncoming(im *incomingMessage) {
@@ -384,6 +339,38 @@ func (h *Hub) BroadcastToRoom(roomUUID string, msgType string, payload any) {
 	h.broadcastToRoom(roomUUID, msgType, payload)
 }
 
+// Этот метод теперь явно вызывается из хендлеров LeaveRoom и KickPlayer
+func (h *Hub) NotifyPlayerLeft(roomUUID string, userID uint64) {
+	h.mu.Lock()
+	r, exists := h.rooms[roomUUID]
+	if !exists {
+		h.mu.Unlock()
+		return
+	}
+
+	client, ok := r.clients[userID]
+	if ok {
+		delete(r.clients, userID)
+	}
+	if r.voiceClients[userID] {
+		delete(r.voiceClients, userID)
+	}
+
+	empty := len(r.clients) == 0
+	if empty {
+		delete(h.rooms, roomUUID)
+	}
+	h.mu.Unlock()
+
+	if ok && client != nil {
+		h.broadcastToRoom(roomUUID, EventPlayerLeft, PlayerLeftPayload{
+			UserID:   client.UserID,
+			Username: client.Username,
+			Total:    len(r.clients),
+		})
+	}
+}
+
 func (h *Hub) KickClient(roomUUID string, targetUserID, byUserID uint64) {
 	h.mu.RLock()
 	r, ok := h.rooms[roomUUID]
@@ -404,31 +391,36 @@ func (h *Hub) KickClient(roomUUID string, targetUserID, byUserID uint64) {
 	})
 
 	go func() {
-		time.Sleep(300 * time.Millisecond)
+		// Даём клиенту время получить сообщение, затем рубим коннект
 		target.conn.Close()
 	}()
 }
 
 func (h *Hub) NotifyRoomDeleted(roomUUID string) {
-	h.mu.RLock()
+	h.mu.Lock()
 	r, ok := h.rooms[roomUUID]
+	if ok {
+		delete(h.rooms, roomUUID)
+	}
+	h.mu.Unlock()
+
 	if !ok {
-		h.mu.RUnlock()
 		return
 	}
+
 	clients := make([]*Client, 0, len(r.clients))
 	for _, c := range r.clients {
 		clients = append(clients, c)
 	}
-	h.mu.RUnlock()
 
 	for _, c := range clients {
 		c.sendMsg(EventRoomDeleted, RoomDeletedPayload{RoomUUID: roomUUID})
 	}
 	go func() {
-		time.Sleep(300 * time.Millisecond)
 		for _, c := range clients {
-			c.conn.Close()
+			if c.conn != nil {
+				c.conn.Close()
+			}
 		}
 	}()
 }
@@ -464,11 +456,11 @@ func (h *Hub) ResetGameNoCtx(roomUUID string) {
 	mgr := h.gameMgr
 	h.mu.RUnlock()
 	if mgr != nil {
+		// ignore context in background call
 		mgr.ResetGame(context.Background(), roomUUID)
 	}
 }
 
-// Добавлено: рассылает новый стейт всем при смене хоста, чтобы обновить UI (корону и права управления)
 func (h *Hub) NotifyHostChanged(roomUUID string, newHostID uint64) {
 	h.mu.Lock()
 	r, ok := h.rooms[roomUUID]
