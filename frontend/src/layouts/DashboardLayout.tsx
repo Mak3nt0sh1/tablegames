@@ -3,11 +3,13 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Gamepad2, User, Settings as SettingsIcon, LogOut, BookOpen} from "lucide-react";
 import { auth, rooms, game } from "../api/client";
 import type { Room } from "../types";
+import { useVoice } from "../context/VoiceContext"; // Импортируем хук войса
 
 export default function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentUser = auth.me();
+  const { leave: leaveVoice } = useVoice(); // Получаем метод выхода из войса
 
   const [activeGame, setActiveGame] = useState<{ room_uuid: string } | null>(null);
   const [myRoom, setMyRoom] = useState<Room | null>(null);
@@ -30,8 +32,9 @@ export default function DashboardLayout() {
   }, [location.pathname]);
 
   const handleLogout = () => {
-    auth.logout();
-    navigate('/login');
+    leaveVoice(); // ПЕРВОЕ: Отключаем микрофон и закрываем соединения
+    auth.logout(); // ВТОРОЕ: Удаляем токен
+    navigate('/login'); // ТРЕТЬЕ: Переходим на вход
   };
 
   const navItems = [
@@ -87,7 +90,6 @@ export default function DashboardLayout() {
             {navItems.find(i => i.path === location.pathname)?.label || "Настольные игры"}
           </h2>
           
-          {/* Кнопка в профиль */}
           <div 
             onClick={() => navigate('/profile')}
             className="flex items-center gap-3 cursor-pointer hover:bg-gray-800 p-2 rounded-lg transition-colors"
@@ -100,8 +102,6 @@ export default function DashboardLayout() {
         </header>
 
         <main className="flex-1 p-8 overflow-y-auto flex flex-col gap-6">
-          
-          {/* Виджет Комнаты */}
           {myRoom && !activeGame && !isCurrentRoom && (
             <div className="bg-gray-900 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between shrink-0">
               <div>
@@ -120,7 +120,6 @@ export default function DashboardLayout() {
             </div>
           )}
 
-          {/* Виджет Игры */}
           {activeGame && !isCurrentGame && (
             <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between shrink-0">
               <div>

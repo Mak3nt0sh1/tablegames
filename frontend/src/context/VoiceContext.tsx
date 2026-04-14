@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
+import { token } from '../api/client';
 
 interface VoiceUser {
   user_id: number;
@@ -14,33 +15,20 @@ interface VoiceContextValue {
   leave: () => void;
   toggleMute: () => void;
   setVoiceUsers: React.Dispatch<React.SetStateAction<VoiceUser[]>>;
-  handleOffer: (fromUserId: number, sdp: string, onAnswer: (targetId: number, sdp: string) => void, onIce: (targetId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => void) => void;
+  handleOffer: (fromUserId: number, sdp: string, onAnswer: (targetId: number, sdp: string) => void, onIce: (targetId: number, candidate: string, sdpMid: string, sdpMLineIndex: number) => void) => void;
   handleAnswer: (fromUserId: number, sdp: string) => void;
-  handleIce: (fromUserId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => void;
-  initPeer: (targetUserId: number, onOffer: (targetId: number, sdp: string) => void, onIce: (targetId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => void) => Promise<void>;
+  handleIce: (fromUserId: number, candidate: string, sdpMid: string, sdpMLineIndex: number) => void;
+  initPeer: (targetUserId: number, onOffer: (targetId: number, sdp: string) => void, onIce: (targetId: number, candidate: string, sdpMid: string, sdpMLineIndex: number) => void) => Promise<void>;
 }
 
 const VoiceContext = createContext<VoiceContextValue | null>(null);
 
 const ICE_SERVERS = {
   iceServers: [
-    // Оставляем бесплатный STUN от Google (он быстрый и надежный)
     { urls: 'stun:stun.l.google.com:19302' },
-    // STUN от Metered
     { urls: 'stun:stun.relay.metered.ca:80' },
-    // TURN-сервера (для обхода NAT и файрволов)
     {
       urls: 'turn:global.relay.metered.ca:80',
-      username: '284f71e9162a1b2df3023c67',
-      credential: 'pBVMYCMAYMxEwsAs',
-    },
-    {
-      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-      username: '284f71e9162a1b2df3023c67',
-      credential: 'pBVMYCMAYMxEwsAs',
-    },
-    {
-      urls: 'turn:global.relay.metered.ca:443',
       username: '284f71e9162a1b2df3023c67',
       credential: 'pBVMYCMAYMxEwsAs',
     },
@@ -63,9 +51,34 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const audioRefs = useRef<Map<number, HTMLAudioElement>>(new Map());
   const isInVoiceRef = useRef(false);
 
+  const leave = useCallback(() => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    peersRef.current.forEach((pc) => pc.close());
+    peersRef.current.clear();
+    audioRefs.current.forEach((a) => { a.srcObject = null; });
+    audioRefs.current.clear();
+    setIsInVoice(false);
+    isInVoiceRef.current = false;
+    setIsMuted(false);
+    setVoiceUsers([]);
+  }, []);
+
+  useEffect(() => {
+    const checkToken = () => {
+      if (!token.get() && isInVoiceRef.current) {
+        leave();
+      }
+    };
+    const interval = setInterval(checkToken, 2000);
+    return () => clearInterval(interval);
+  }, [leave]);
+
   const createPeer = useCallback((
     targetUserId: number,
-    onIce: (targetId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => void
+    onIce: (targetId: number, candidate: string, sdpMid: string, sdpMLineIndex: number) => void
   ): RTCPeerConnection => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
 
@@ -75,7 +88,12 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        onIce(targetUserId, e.candidate.candidate, e.candidate.sdpMid ?? '', e.candidate.sdpMLineIndex ?? 0);
+        onIce(
+            targetUserId, 
+            e.candidate.candidate, 
+            e.candidate.sdpMid ?? '', 
+            e.candidate.sdpMLineIndex ?? 0
+        );
       }
     };
 
@@ -106,20 +124,6 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const leave = useCallback(() => {
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
-    localStreamRef.current = null;
-    peersRef.current.forEach((pc) => pc.close());
-    peersRef.current.clear();
-    audioRefs.current.forEach((a) => { a.srcObject = null; });
-    audioRefs.current.clear();
-    setIsInVoice(false);
-    isInVoiceRef.current = false;
-    setIsMuted(false);
-    // ИСПРАВЛЕНИЕ: Мы БОЛЬШЕ НЕ ОЧИЩАЕМ setVoiceUsers([]). 
-    // Потому что если мы вышли, остальные всё ещё сидят там, и мы должны их видеть!
-  }, []);
-
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       localStreamRef.current?.getAudioTracks().forEach((t) => {
@@ -132,7 +136,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const initPeer = useCallback(async (
     targetUserId: number,
     onOffer: (targetId: number, sdp: string) => void,
-    onIce: (targetId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => void
+    onIce: (targetId: number, candidate: string, sdpMid: string, sdpMLineIndex: number) => void
   ) => {
     const pc = createPeer(targetUserId, onIce);
     const offer = await pc.createOffer();
@@ -144,7 +148,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     fromUserId: number,
     sdp: string,
     onAnswer: (targetId: number, sdp: string) => void,
-    onIce: (targetId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => void
+    onIce: (targetId: number, candidate: string, sdpMid: string, sdpMLineIndex: number) => void
   ) => {
     if (!isInVoiceRef.current) return;
     const pc = createPeer(fromUserId, onIce);
@@ -162,9 +166,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     pc?.setRemoteDescription({ type: 'answer', sdp }).catch(console.error);
   }, []);
 
-  const handleIce = useCallback((fromUserId: number, candidate: string, sdpMid: string, sdpMlineIndex: number) => {
+  const handleIce = useCallback((fromUserId: number, candidate: string, sdpMid: string, sdpMLineIndex: number) => {
     const pc = peersRef.current.get(fromUserId);
-    pc?.addIceCandidate({ candidate, sdpMid, sdpMLineIndex: sdpMlineIndex }).catch(console.error);
+    if (pc) {
+        pc.addIceCandidate({ candidate, sdpMid, sdpMLineIndex }).catch(console.error);
+    }
   }, []);
 
   useEffect(() => {
