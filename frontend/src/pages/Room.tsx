@@ -232,6 +232,8 @@ export default function Room() {
 
   if (!room) return null;
 
+  const isStartDisabled = !selectedGame || starting || players.length < 2;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-6">
@@ -417,8 +419,12 @@ export default function Room() {
           {(room?.status === 'waiting' || room?.status === 'finished') && isHost && (
             <button
               onClick={handleStartGame}
-              disabled={!selectedGame || starting || players.length < 2}
-              className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-green-500/20"
+              disabled={isStartDisabled}
+              className={`w-full font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2 shadow-lg 
+                ${isStartDisabled 
+                    ? 'bg-gray-800 text-gray-500 shadow-none cursor-not-allowed' 
+                    : 'bg-green-600 hover:bg-green-500 text-white shadow-green-500/20'
+                }`}
             >
               <Play size={20} />
               {starting ? 'Запускаем...' : players.length < 2 ? 'Нужно 2+ игроков' : room.status === 'finished' ? 'Новая игра' : 'Начать игру'}
