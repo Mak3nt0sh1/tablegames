@@ -1,41 +1,52 @@
 // src/hooks/useNotifications.ts
-// Браузерные уведомления когда вкладка не активна
-
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import { getSettings } from './useSettings';
 
 export function useNotifications() {
-
-  // Запрашиваем разрешение при включении настройки
-  useEffect(() => {
-    if (getSettings().notificationsEnabled && 'Notification' in window) {
-      if (Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
-    }
-  }, []);
-
   const notify = useCallback((title: string, body?: string) => {
-    if (!getSettings().notificationsEnabled) return;
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    // Показываем только когда вкладка не активна
-    if (document.visibilityState === 'visible') return;
+    // 1. Проверяем настройки внутри игры
+    if (!getSettings().notificationsEnabled) {
+      console.log('[Notify] Заблокировано: Уведомления выключены в настройках игры');
+      return;
+    }
+    
+    // 2. Проверяем поддержку браузером
+    if (!('Notification' in window)) {
+      console.log('[Notify] Заблокировано: Браузер не поддерживает уведомления');
+      return;
+    }
 
-    const n = new Notification(title, {
-      body,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-    });
+    // 3. Проверяем права в самом браузере
+    if (Notification.permission !== 'granted') {
+      console.log(`[Notify] Заблокировано: Нет прав в браузере. Текущий статус: ${Notification.permission}`);
+      return;
+    }
+    
+    // 4. Проверяем фокус (чтобы не спамить, когда игрок и так смотрит в игру)
+    if (document.hasFocus()) {
+      console.log('[Notify] Пропущено: Окно игры сейчас активно (в фокусе)');
+      return;
+    }
 
-    // Автозакрытие через 4 секунды
-    setTimeout(() => n.close(), 4000);
+    try {
+      const n = new Notification(title, {
+        body,
+        icon: '/favicon.ico',
+      });
 
-    // Фокус на вкладку при клике
-    n.onclick = () => {
-      window.focus();
-      n.close();
-    };
+      console.log(`[Notify] УСПЕШНО ОТПРАВЛЕНО: ${title}`);
+
+      // Автозакрытие через 4 секунды
+      setTimeout(() => n.close(), 4000);
+
+      // Фокус на вкладку при клике на уведомление
+      n.onclick = () => {
+        window.focus();
+        n.close();
+      };
+    } catch (e) {
+      console.error('[Notify] Ошибка при создании уведомления:', e);
+    }
   }, []);
 
   return { notify };
