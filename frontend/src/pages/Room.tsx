@@ -63,7 +63,7 @@ export default function Room() {
       }
     };
     init();
-  }, [roomId, location.key]);
+  }, [roomId, location.key, navigate]);
 
   const { setVoiceUsers, handleOffer, handleAnswer, handleIce, initPeer, leave: leaveVoice, join: joinVoice } = useVoice();
 
@@ -177,6 +177,9 @@ export default function Room() {
     setStarting(true);
     setError('');
     try {
+      if (room?.status === 'finished') {
+        await game.reset(roomId);
+      }
       await game.start(roomId, selectedGame);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Ошибка запуска');
@@ -383,7 +386,6 @@ export default function Room() {
         />
 
         <div className="space-y-3 mt-6">
-          {/* Активная игра */}
           {room?.status === 'playing' && (
             <div className="space-y-2 mb-4 p-3 bg-indigo-500/5 rounded-2xl border border-indigo-500/20">
               <p className="text-indigo-400 text-xs font-bold text-center uppercase tracking-widest mb-2">Активная игра</p>
@@ -412,21 +414,9 @@ export default function Room() {
             </div>
           )}
 
-          {/* Запуск игры */}
           {(room?.status === 'waiting' || room?.status === 'finished') && isHost && (
             <button
-              onClick={async () => {
-                if (!roomId || !selectedGame) return;
-                setStarting(true);
-                setError('');
-                try {
-                  if (room.status === 'finished') await game.reset(roomId);
-                  await game.start(roomId, selectedGame);
-                } catch (e: unknown) {
-                  setError(e instanceof Error ? e.message : 'Ошибка запуска');
-                  setStarting(false);
-                }
-              }}
+              onClick={handleStartGame}
               disabled={!selectedGame || starting || players.length < 2}
               className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-green-500/20"
             >
