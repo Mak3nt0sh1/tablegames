@@ -36,6 +36,11 @@ func NewService(repo *Repository) *Service {
 }
 
 func (s *Service) CreateRoom(ctx context.Context, hostID uint64, name string, maxPlayers int, password string) (*models.Room, error) {
+	// ПРОВЕРКА: Если у юзера уже есть комната, запрещаем создавать новую
+	if activeRoom, err := s.GetUserRoom(ctx, hostID); err == nil && activeRoom != nil {
+		return nil, errors.New("у вас уже есть активная комната. Покиньте её перед созданием новой")
+	}
+
 	code, err := generateInviteCode()
 	if err != nil {
 		return nil, err
@@ -47,7 +52,7 @@ func (s *Service) CreateRoom(ctx context.Context, hostID uint64, name string, ma
 		InviteCode: code,
 		MaxPlayers: maxPlayers,
 		Status:     "waiting",
-		ExpiresAt:  time.Now().Add(24 * time.Hour),
+		ExpiresAt:  time.Now().Add(1 * time.Hour), // Комната живёт 24 часа
 	}
 	if password != "" {
 		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -65,7 +70,18 @@ func (s *Service) CreateRoom(ctx context.Context, hostID uint64, name string, ma
 }
 
 func (s *Service) GetRoom(ctx context.Context, uuid string) (*models.Room, error) {
-	return s.repo.FindByUUID(ctx, uuid)
+	room, err := s.repo.FindByUUID(ctx, uuid)
+	if err != nil {
+		return nil, err
+	}
+
+	// ЛЕНИВАЯ ОЧИСТКА: Если комната просрочена (прошло 24 часа), удаляем её
+	if time.Now().After(room.ExpiresAt) {
+		_ = s.repo.DeleteRoom(ctx, room.ID)
+		return nil, ErrRoomNotFound
+	}
+
+	return room, nil
 }
 
 func (s *Service) GetMembers(ctx context.Context, roomID uint64) ([]models.RoomMember, error) {
@@ -122,7 +138,6 @@ func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64
 	return room, nil
 }
 
-// Изменено: теперь возвращает ID нового хоста (если он сменился) и bool (удалена ли комната)
 func (s *Service) LeaveRoom(ctx context.Context, roomUUID string, userID uint64) (uint64, bool, error) {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {
@@ -137,16 +152,13 @@ func (s *Service) LeaveRoom(ctx context.Context, roomUUID string, userID uint64)
 	var newHostID uint64
 	var roomDeleted bool
 
-	// Если ушел хост, нужно передать права следующему или удалить комнату
 	if room.HostID == userID {
 		members, err := s.repo.GetMembers(ctx, room.ID)
 		if err == nil && len(members) > 0 {
-			// Выбираем нового хоста (первого оставшегося)
 			newHostID = members[0].UserID
 			_ = s.repo.UpdateMemberRole(ctx, room.ID, newHostID, "host")
 			_ = s.repo.UpdateRoomHost(ctx, room.ID, newHostID)
 		} else {
-			// Если никого не осталось, удаляем комнату
 			_ = s.repo.DeleteRoom(ctx, room.ID)
 			roomDeleted = true
 		}
@@ -189,6 +201,13 @@ func (s *Service) JoinByCode(ctx context.Context, userID uint64, code string, pa
 	if err != nil {
 		return nil, ErrRoomNotFound
 	}
+
+	// ЛЕНИВАЯ ОЧИСТКА: Если заходят по коду в просроченную комнату
+	if time.Now().After(room.ExpiresAt) {
+		_ = s.repo.DeleteRoom(ctx, room.ID)
+		return nil, ErrRoomNotFound
+	}
+
 	if room.HasPassword() {
 		if password == "" {
 			return nil, ErrWrongPassword
@@ -213,6 +232,13 @@ func (s *Service) JoinByToken(ctx context.Context, userID uint64, token string) 
 	if err != nil {
 		return nil, ErrRoomNotFound
 	}
+
+	// ЛЕНИВАЯ ОЧИСТКА
+	if time.Now().After(room.ExpiresAt) {
+		_ = s.repo.DeleteRoom(ctx, room.ID)
+		return nil, ErrRoomNotFound
+	}
+
 	_ = s.repo.UpdateInviteStatus(ctx, invite.ID, "accepted")
 	return s.joinRoom(ctx, userID, &room)
 }
@@ -246,6 +272,12 @@ func (s *Service) joinRoom(ctx context.Context, userID uint64, room *models.Room
 	if s.repo.IsMemberDirect(ctx, room.ID, userID) {
 		return room, nil
 	}
+
+	// ПРОВЕРКА: Если у юзера уже есть активная комната, не пускаем во вторую
+	if activeRoom, err := s.GetUserRoom(ctx, userID); err == nil && activeRoom != nil && activeRoom.ID != room.ID {
+		return nil, errors.New("вы уже находитесь в другой комнате. Покиньте её перед вступлением")
+	}
+
 	if room.Status == "playing" {
 		return nil, ErrRoomNotAvail
 	}
@@ -292,11 +324,19 @@ func (s *Service) GetUserRoom(ctx context.Context, userID uint64) (*models.Room,
 	if err != nil || len(members) == 0 {
 		return nil, ErrRoomNotFound
 	}
+
 	for _, roomID := range members {
 		room, err := s.repo.FindByID(ctx, roomID)
 		if err != nil {
 			continue
 		}
+
+		// АВТООЧИСТКА: Если комната просрочена (прошло 24 часа), молча её сносим из БД
+		if time.Now().After(room.ExpiresAt) {
+			_ = s.repo.DeleteRoom(ctx, room.ID)
+			continue
+		}
+
 		if room.Status == "waiting" || room.Status == "playing" || room.Status == "finished" {
 			return room, nil
 		}
