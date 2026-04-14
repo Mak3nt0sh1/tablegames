@@ -22,7 +22,7 @@ func NewGame(roomUUID string, players []struct {
 	UserID   uint64
 	Username string
 }) *Game {
-	deck := shuffle(newDeck(), time.Now().UnixNano())
+	deck := shuffle(newDeck())
 
 	state := &GameState{
 		RoomUUID:    roomUUID,
@@ -262,7 +262,7 @@ func (g *Game) reshuffleDiscard() {
 	top := s.DiscardPile[len(s.DiscardPile)-1]
 	toShuffle := make([]Card, len(s.DiscardPile)-1)
 	copy(toShuffle, s.DiscardPile[:len(s.DiscardPile)-1])
-	s.DrawPile = shuffle(toShuffle, time.Now().UnixNano())
+	s.DrawPile = shuffle(toShuffle)
 	s.DiscardPile = []Card{top}
 }
 

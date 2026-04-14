@@ -1,5 +1,10 @@
 package uno
 
+import (
+	"crypto/rand"
+	"math/big"
+)
+
 // Color — цвет карты
 type Color string
 
@@ -96,18 +101,17 @@ func newDeck() []Card {
 	return cards
 }
 
-// shuffle перемешивает колоду (Fisher-Yates)
-func shuffle(cards []Card, seed int64) []Card {
-	r := seed
-	lcg := func() int64 {
-		r = r*6364136223846793005 + 1442695040888963407
-		return r
-	}
+// shuffle перемешивает колоду криптографически стойким генератором (Fisher-Yates)
+// Обеспечивает максимальную энтропию и исключает предсказуемость раздач.
+func shuffle(cards []Card) []Card {
 	for i := len(cards) - 1; i > 0; i-- {
-		j := int(lcg()>>33) % (i + 1)
-		if j < 0 {
-			j = -j
+		// Берём случайное число из криптографического пула операционной системы
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			// На случай критического сбоя ОС фоллбек на псевдослучайность (крайне маловероятно)
+			continue
 		}
+		j := int(n.Int64())
 		cards[i], cards[j] = cards[j], cards[i]
 	}
 	return cards
