@@ -4,48 +4,49 @@ import { getSettings } from './useSettings';
 
 export function useNotifications() {
   const notify = useCallback((title: string, body?: string) => {
-    // 1. Проверяем настройки внутри игры
+    console.log('--- ПОПЫТКА ОТПРАВИТЬ УВЕДОМЛЕНИЕ ---');
+    
     if (!getSettings().notificationsEnabled) {
-      console.log('[Notify] Заблокировано: Уведомления выключены в настройках игры');
+      console.warn('[Notify] Выключено в настройках игры');
       return;
     }
     
-    // 2. Проверяем поддержку браузером
     if (!('Notification' in window)) {
-      console.log('[Notify] Заблокировано: Браузер не поддерживает уведомления');
+      console.error('[Notify] Браузер не поддерживает Notification API');
       return;
     }
 
-    // 3. Проверяем права в самом браузере
     if (Notification.permission !== 'granted') {
-      console.log(`[Notify] Заблокировано: Нет прав в браузере. Текущий статус: ${Notification.permission}`);
+      console.error('[Notify] Нет прав! Статус:', Notification.permission);
       return;
     }
     
-    // 4. Проверяем фокус (чтобы не спамить, когда игрок и так смотрит в игру)
+    // Если окно в фокусе — Chrome часто блокирует уведомления, чтобы не дублировать инфу
     if (document.hasFocus()) {
-      console.log('[Notify] Пропущено: Окно игры сейчас активно (в фокусе)');
+      console.log('[Notify] Окно в фокусе, уведомление пропущено');
       return;
     }
 
     try {
+      // Chrome требует иконку по полному пути, либо правильному относительному
+      const icon = window.location.origin + '/favicon.ico';
+      
       const n = new Notification(title, {
-        body,
-        icon: '/favicon.ico',
+        body: body || '',
+        icon: icon,
+        tag: 'tablegames-alert', // Группирует уведомления, чтобы не спамить 100 штук
       });
 
-      console.log(`[Notify] УСПЕШНО ОТПРАВЛЕНО: ${title}`);
+      console.log('[Notify] Создан объект Notification:', n);
 
-      // Автозакрытие через 4 секунды
-      setTimeout(() => n.close(), 4000);
-
-      // Фокус на вкладку при клике на уведомление
       n.onclick = () => {
         window.focus();
         n.close();
       };
+      
+      setTimeout(() => n.close(), 5000);
     } catch (e) {
-      console.error('[Notify] Ошибка при создании уведомления:', e);
+      console.error('[Notify] Критическая ошибка при создании:', e);
     }
   }, []);
 
