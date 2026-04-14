@@ -27,7 +27,7 @@ export default function Room() {
   const [room, setRoom] = useState<RoomType | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [isCopied, setIsCopied] = useState(false);
-  const [selectedGame, setSelectedGame] = useState('');
+  const [selectedGame, setSelectedGame] = useState('uno'); // Сразу ставим UNO по умолчанию
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
@@ -45,7 +45,7 @@ export default function Room() {
       try {
         let r = await rooms.get(roomId);
         setRoom(r);
-        setSelectedGame(r.game_type || '');
+        setSelectedGame(r.game_type || 'uno');
 
         if (r.status === 'playing') {
           try {
@@ -69,11 +69,7 @@ export default function Room() {
 
   const { sendChat, sendVoiceJoin, sendVoiceLeave, sendVoiceOffer, sendVoiceAnswer, sendVoiceIce } = useWebSocket(roomId ?? null, {
     onRoomState: (payload: RoomStatePayload) => {
-      // Обновляем список игроков
       setPlayers(payload.players);
-      
-      // ИСПРАВЛЕНИЕ ЗДЕСЬ: Обязательно обновляем параметры комнаты (включая нового host_id), 
-      // чтобы у нового хоста моментально появились кнопки управления
       setRoom((prev) => prev ? { 
         ...prev, 
         host_id: payload.host_id, 
@@ -296,12 +292,13 @@ export default function Room() {
                     )}
                   </span>
                 </div>
+                {/* КНОПКА ВЫГНАТЬ — теперь красная и заметная */}
                 {isHost && player.role !== 'host' && (
                   <button
                     onClick={() => handleKick(player.user_id)}
-                    className="text-red-400 hover:text-red-300 text-xs px-3 py-1 rounded-lg hover:bg-red-500/10 transition-colors"
+                    className="text-red-400 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-xs px-3 py-1.5 rounded-lg transition-colors font-medium"
                   >
-                    Кик
+                    Выгнать
                   </button>
                 )}
               </div>
@@ -340,12 +337,11 @@ export default function Room() {
                 onChange={(e) => handleSelectGame(e.target.value)}
                 className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
               >
-                <option value="">Не выбрана</option>
                 <option value="uno">UNO</option>
               </select>
             ) : (
               <div className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-gray-400">
-                {selectedGame ? selectedGame.toUpperCase() : 'Хост выбирает игру...'}
+                {selectedGame ? selectedGame.toUpperCase() : 'UNO'}
               </div>
             )}
           </div>

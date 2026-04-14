@@ -25,7 +25,6 @@ export default function DashboardLayout() {
 
     fetchState();
     
-    // Интервал для гарантированного обновления виджетов
     const interval = setInterval(fetchState, 5000);
     return () => clearInterval(interval);
   }, [location.pathname]);
@@ -87,8 +86,15 @@ export default function DashboardLayout() {
           <h2 className="text-lg font-semibold text-gray-200">
             {navItems.find(i => i.path === location.pathname)?.label || "Настольные игры"}
           </h2>
-          <div className="flex items-center gap-3 cursor-pointer hover:bg-gray-800 p-2 rounded-lg transition-colors">
-            <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-full"></div>
+          
+          {/* Кнопка в профиль */}
+          <div 
+            onClick={() => navigate('/profile')}
+            className="flex items-center gap-3 cursor-pointer hover:bg-gray-800 p-2 rounded-lg transition-colors"
+          >
+            <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-full flex items-center justify-center font-bold text-white text-sm">
+              {currentUser?.username?.[0]?.toUpperCase() ?? "Г"}
+            </div>
             <span className="font-medium">{currentUser?.username ?? "Гость"}</span>
           </div>
         </header>

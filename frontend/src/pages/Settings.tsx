@@ -1,18 +1,16 @@
-import { useState } from 'react';
-import { Volume2, Bell, Monitor, Check, Mic } from 'lucide-react';
+import { Volume2, Bell, Monitor, Mic } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
 
 export default function Settings() {
   const { settings, save } = useSettings();
-  const [saved, setSaved] = useState(false);
 
-  const handleSave = () => {
-    // Запрашиваем разрешение на уведомления если включили
-    if (settings.notificationsEnabled && 'Notification' in window) {
+  const handleNotificationToggle = () => {
+    const nextValue = !settings.notificationsEnabled;
+    save({ notificationsEnabled: nextValue });
+    // Запрашиваем разрешение на уведомления при включении
+    if (nextValue && 'Notification' in window) {
       Notification.requestPermission();
     }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
   };
 
   const Toggle = ({ value, onChange }: { value: boolean; onChange: () => void }) => (
@@ -75,7 +73,7 @@ export default function Settings() {
           title="Браузерные уведомления"
           desc="Когда ваш ход или кто-то зашёл в комнату"
           value={settings.notificationsEnabled}
-          onChange={() => save({ notificationsEnabled: !settings.notificationsEnabled })}
+          onChange={handleNotificationToggle}
         />
         {'Notification' in window && Notification.permission === 'denied' && (
           <p className="text-yellow-400 text-sm bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3">
@@ -111,18 +109,6 @@ export default function Settings() {
           onChange={() => save({ chatVisible: !settings.chatVisible })}
         />
       </div>
-
-      {/* Сохранить */}
-      <button
-        onClick={handleSave}
-        className={`w-full py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 ${
-          saved
-            ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-            : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-        }`}
-      >
-        {saved ? <><Check size={18} /> Сохранено!</> : 'Сохранить'}
-      </button>
     </div>
   );
 }
