@@ -116,7 +116,6 @@ func (r *Repository) UpdateInviteStatus(ctx context.Context, id uint64, status s
 	return err
 }
 
-// SaveGameResult — сохраняет результат игры одного игрока
 func (r *Repository) SaveGameResult(ctx context.Context, roomID, userID uint64, gameType, result string, score int) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO game_results (room_id, user_id, game_type, result, score) VALUES (?, ?, ?, ?, ?)`,
@@ -125,13 +124,11 @@ func (r *Repository) SaveGameResult(ctx context.Context, roomID, userID uint64, 
 	return err
 }
 
-// IsMemberDirect — синхронная проверка членства без error
 func (r *Repository) IsMemberDirect(ctx context.Context, roomID, userID uint64) bool {
 	_, err := r.FindMember(ctx, roomID, userID)
 	return err == nil
 }
 
-// FindRoomsByUserID — возвращает список room_id где состоит пользователь
 func (r *Repository) FindRoomsByUserID(ctx context.Context, userID uint64) ([]uint64, error) {
 	var ids []uint64
 	err := r.db.SelectContext(ctx, &ids,
@@ -139,7 +136,6 @@ func (r *Repository) FindRoomsByUserID(ctx context.Context, userID uint64) ([]ui
 	return ids, err
 }
 
-// FindByID — находит комнату по ID
 func (r *Repository) FindByID(ctx context.Context, roomID uint64) (*models.Room, error) {
 	var room models.Room
 	err := r.db.GetContext(ctx, &room, `SELECT * FROM rooms WHERE id = ?`, roomID)
@@ -148,5 +144,17 @@ func (r *Repository) FindByID(ctx context.Context, roomID uint64) (*models.Room,
 
 func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ? WHERE id = ?`, status, roomID)
+	return err
+}
+
+// Добавленные методы для передачи хоста
+
+func (r *Repository) UpdateRoomHost(ctx context.Context, roomID, newHostID uint64) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET host_id = ? WHERE id = ?`, newHostID, roomID)
+	return err
+}
+
+func (r *Repository) UpdateMemberRole(ctx context.Context, roomID, userID uint64, role string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE room_members SET role = ? WHERE room_id = ? AND user_id = ?`, role, roomID, userID)
 	return err
 }

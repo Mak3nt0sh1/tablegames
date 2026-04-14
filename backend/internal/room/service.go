@@ -25,7 +25,6 @@ var (
 	ErrUnsupportedGame = errors.New("unsupported game type")
 )
 
-// SupportedGames — список поддерживаемых игр
 var supportedGames = map[string]bool{"uno": true}
 
 type Service struct {
@@ -123,15 +122,37 @@ func (s *Service) UpdateRoom(ctx context.Context, roomUUID string, hostID uint64
 	return room, nil
 }
 
-func (s *Service) LeaveRoom(ctx context.Context, roomUUID string, userID uint64) error {
+// Изменено: теперь возвращает ID нового хоста (если он сменился) и bool (удалена ли комната)
+func (s *Service) LeaveRoom(ctx context.Context, roomUUID string, userID uint64) (uint64, bool, error) {
 	room, err := s.repo.FindByUUID(ctx, roomUUID)
 	if err != nil {
-		return ErrRoomNotFound
+		return 0, false, ErrRoomNotFound
 	}
+
+	err = s.repo.RemoveMember(ctx, room.ID, userID)
+	if err != nil {
+		return 0, false, err
+	}
+
+	var newHostID uint64
+	var roomDeleted bool
+
+	// Если ушел хост, нужно передать права следующему или удалить комнату
 	if room.HostID == userID {
-		return errors.New("host cannot leave, use delete room instead")
+		members, err := s.repo.GetMembers(ctx, room.ID)
+		if err == nil && len(members) > 0 {
+			// Выбираем нового хоста (первого оставшегося)
+			newHostID = members[0].UserID
+			_ = s.repo.UpdateMemberRole(ctx, room.ID, newHostID, "host")
+			_ = s.repo.UpdateRoomHost(ctx, room.ID, newHostID)
+		} else {
+			// Если никого не осталось, удаляем комнату
+			_ = s.repo.DeleteRoom(ctx, room.ID)
+			roomDeleted = true
+		}
 	}
-	return s.repo.RemoveMember(ctx, room.ID, userID)
+
+	return newHostID, roomDeleted, nil
 }
 
 func (s *Service) KickPlayer(ctx context.Context, roomUUID string, hostID, targetUserID uint64) error {
@@ -266,19 +287,16 @@ func (s *Service) SaveGameResults(ctx context.Context, roomID uint64, gameType s
 	return nil
 }
 
-// GetUserRoom — возвращает активную комнату пользователя если он в ней состоит
 func (s *Service) GetUserRoom(ctx context.Context, userID uint64) (*models.Room, error) {
 	members, err := s.repo.FindRoomsByUserID(ctx, userID)
 	if err != nil || len(members) == 0 {
 		return nil, ErrRoomNotFound
 	}
-	// Берём последнюю активную комнату
 	for _, roomID := range members {
 		room, err := s.repo.FindByID(ctx, roomID)
 		if err != nil {
 			continue
 		}
-		// ИСПРАВЛЕНИЕ ЗДЕСЬ: Возвращаем комнату, даже если игра завершена
 		if room.Status == "waiting" || room.Status == "playing" || room.Status == "finished" {
 			return room, nil
 		}

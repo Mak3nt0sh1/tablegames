@@ -128,8 +128,6 @@ func (h *Hub) handleUnregister(client *Client) {
 		return
 	}
 
-	// ИСПРАВЛЕНИЕ: Защита от гонки (Race Condition).
-	// Если клиент в мапе не совпадает с тем, кто отключается (значит игрок уже обновил страницу и зашёл с новым сокетом), мы ИГНОРИРУЕМ удаление!
 	if currentClient, ok := r.clients[client.UserID]; ok {
 		if currentClient != client {
 			h.mu.Unlock()
@@ -139,7 +137,6 @@ func (h *Hub) handleUnregister(client *Client) {
 
 	delete(r.clients, client.UserID)
 	wasInVoice := r.voiceClients[client.UserID]
-	// Мы НЕ удаляем из voiceClients сразу, чтобы при обновлении страницы (F5) человек оставался в войсе
 	h.mu.Unlock()
 
 	log.Printf("ws: user=%d (%s) connection dropped room=%s", client.UserID, client.Username, client.RoomUUID)
@@ -149,7 +146,7 @@ func (h *Hub) handleUnregister(client *Client) {
 	if t, ok := h.pendingLeft[key]; ok {
 		t.Stop()
 	}
-	// Ждём 3 секунды. Если игрок не вернулся — удаляем окончательно
+
 	h.pendingLeft[key] = time.AfterFunc(3*time.Second, func() {
 		h.mu.Lock()
 		delete(h.pendingLeft, key)
@@ -158,7 +155,6 @@ func (h *Hub) handleUnregister(client *Client) {
 			h.mu.Unlock()
 			return
 		}
-		// Если игрок успел переподключиться
 		if _, reconnected := r2.clients[client.UserID]; reconnected {
 			h.mu.Unlock()
 			return
@@ -166,7 +162,6 @@ func (h *Hub) handleUnregister(client *Client) {
 
 		empty := len(r2.clients) == 0
 
-		// Только теперь удаляем из войса
 		if wasInVoice {
 			delete(r2.voiceClients, client.UserID)
 		}
@@ -470,5 +465,28 @@ func (h *Hub) ResetGameNoCtx(roomUUID string) {
 	h.mu.RUnlock()
 	if mgr != nil {
 		mgr.ResetGame(context.Background(), roomUUID)
+	}
+}
+
+// Добавлено: рассылает новый стейт всем при смене хоста, чтобы обновить UI (корону и права управления)
+func (h *Hub) NotifyHostChanged(roomUUID string, newHostID uint64) {
+	h.mu.Lock()
+	r, ok := h.rooms[roomUUID]
+	if ok {
+		r.hostID = newHostID
+	}
+	h.mu.Unlock()
+
+	if ok {
+		h.mu.RLock()
+		clients := make([]*Client, 0, len(r.clients))
+		for _, c := range r.clients {
+			clients = append(clients, c)
+		}
+		h.mu.RUnlock()
+
+		for _, c := range clients {
+			h.sendRoomState(c, r)
+		}
 	}
 }

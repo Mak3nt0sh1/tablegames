@@ -22,6 +22,7 @@ type Hub interface {
 	NotifyGameSelected(roomUUID string, gameType string)
 	ForceRemovePlayer(roomUUID string, userID uint64)
 	ResetGameNoCtx(roomUUID string)
+	NotifyHostChanged(roomUUID string, newHostID uint64) // Добавлено для передачи хоста
 }
 
 func NewHandler(svc *Service, hub Hub) *Handler {
@@ -73,8 +74,8 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name       string  `json:"name"`
 		MaxPlayers int     `json:"max_players"`
-		Password   *string `json:"password"`  // nil = не менять, "" = убрать, "xxx" = установить
-		GameType   string  `json:"game_type"` // "" = не менять
+		Password   *string `json:"password"`
+		GameType   string  `json:"game_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
@@ -92,7 +93,6 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// Если хост выбрал игру — уведомляем всех через WS
 	if req.GameType != "" {
 		h.hub.NotifyGameSelected(uuid, room.GameType)
 	}
@@ -111,7 +111,6 @@ func (h *Handler) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Сбрасываем активную игру если идёт
 	h.hub.ResetGameNoCtx(uuid)
 	h.hub.NotifyRoomDeleted(uuid)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -169,7 +168,9 @@ func (h *Handler) JoinByToken(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uint64)
 	uuid := chi.URLParam(r, "uuid")
-	if err := h.svc.LeaveRoom(r.Context(), uuid, userID); err != nil {
+
+	newHostID, roomDeleted, err := h.svc.LeaveRoom(r.Context(), uuid, userID)
+	if err != nil {
 		if errors.Is(err, ErrForbidden) {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
@@ -177,8 +178,18 @@ func (h *Handler) LeaveRoom(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	// Убираем из активной игры если идёт
 	h.hub.ForceRemovePlayer(uuid, userID)
+
+	// Оповещаем WebSocket если комната удалилась или передали права
+	if roomDeleted {
+		h.hub.ResetGameNoCtx(uuid)
+		h.hub.NotifyRoomDeleted(uuid)
+	} else if newHostID > 0 {
+		h.hub.NotifyHostChanged(uuid, newHostID)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
 }
 
@@ -210,7 +221,6 @@ func (h *Handler) KickPlayer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "kicked"})
 }
 
-// toRoomJSON — скрывает password_hash, возвращает has_password
 func toRoomJSON(room *models.Room) map[string]any {
 	return map[string]any{
 		"id":           room.ID,
@@ -237,8 +247,6 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// GetMyRoom — GET /api/rooms/my
-// Возвращает текущую комнату пользователя если он в ней состоит
 func (h *Handler) GetMyRoom(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uint64)
 	room, err := h.svc.GetUserRoom(r.Context(), userID)
