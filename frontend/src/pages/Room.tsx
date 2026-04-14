@@ -27,7 +27,7 @@ export default function Room() {
   const [room, setRoom] = useState<RoomType | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [isCopied, setIsCopied] = useState(false);
-  const [selectedGame, setSelectedGame] = useState('uno'); // Сразу ставим UNO по умолчанию
+  const [selectedGame, setSelectedGame] = useState('uno');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
@@ -198,13 +198,15 @@ export default function Room() {
 
   const handleDeleteRoom = async () => {
     if (!roomId) return;
-    try {
-      await rooms.delete(roomId);
-    } catch (e: unknown) {
-      console.error('Delete error:', e);
-    } finally {
-      leaveVoice();
-      navigate('/');
+    if (confirm('Вы действительно хотите удалить комнату? Все игроки будут исключены.')) {
+        try {
+            await rooms.delete(roomId);
+        } catch (e: unknown) {
+            console.error('Delete error:', e);
+        } finally {
+            leaveVoice();
+            navigate('/');
+        }
     }
   };
 
@@ -292,7 +294,6 @@ export default function Room() {
                     )}
                   </span>
                 </div>
-                {/* КНОПКА ВЫГНАТЬ — теперь красная и заметная */}
                 {isHost && player.role !== 'host' && (
                   <button
                     onClick={() => handleKick(player.user_id)}
@@ -382,56 +383,55 @@ export default function Room() {
         />
 
         <div className="space-y-3 mt-6">
-          {room?.status === 'playing' && isHost && (
-            <button
-              onClick={async () => {
-                if (!roomId) return;
-                try { await game.forceEnd(roomId); } catch {}
-              }}
-              className="w-full bg-red-600/80 hover:bg-red-500 text-white font-bold rounded-xl px-4 py-3 transition-colors flex items-center justify-center gap-2"
-            >
-              ✕ Завершить игру
-            </button>
-          )}
+          {/* Активная игра */}
           {room?.status === 'playing' && (
-            <button
-              onClick={() => navigate(`/${roomId}/game`)}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2"
-            >
-              <Play size={20} />
-              Вернуться в игру
-            </button>
+            <div className="space-y-2 mb-4 p-3 bg-indigo-500/5 rounded-2xl border border-indigo-500/20">
+              <p className="text-indigo-400 text-xs font-bold text-center uppercase tracking-widest mb-2">Активная игра</p>
+              
+              <button
+                onClick={() => navigate(`/${roomId}/game`)}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"
+              >
+                <Play size={20} />
+                Вернуться в игру
+              </button>
+
+              {isHost && (
+                <button
+                  onClick={async () => {
+                    if (!roomId) return;
+                    if (confirm('Принудительно завершить игру для всех?')) {
+                        try { await game.forceEnd(roomId); } catch {}
+                    }
+                  }}
+                  className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 font-bold rounded-xl px-4 py-3 transition-colors flex items-center justify-center gap-2"
+                >
+                  ✕ Завершить игру
+                </button>
+              )}
+            </div>
           )}
 
-          {room?.status === 'finished' && isHost && (
+          {/* Запуск игры */}
+          {(room?.status === 'waiting' || room?.status === 'finished') && isHost && (
             <button
               onClick={async () => {
                 if (!roomId || !selectedGame) return;
                 setStarting(true);
+                setError('');
                 try {
-                  await game.reset(roomId);
+                  if (room.status === 'finished') await game.reset(roomId);
                   await game.start(roomId, selectedGame);
                 } catch (e: unknown) {
-                  setError(e instanceof Error ? e.message : 'Ошибка');
+                  setError(e instanceof Error ? e.message : 'Ошибка запуска');
                   setStarting(false);
                 }
               }}
               disabled={!selectedGame || starting || players.length < 2}
-              className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2"
+              className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-green-500/20"
             >
               <Play size={20} />
-              {starting ? 'Запускаем...' : players.length < 2 ? 'Нужно 2+ игроков' : 'Новая игра'}
-            </button>
-          )}
-
-          {room?.status === 'waiting' && isHost && (
-            <button
-              onClick={handleStartGame}
-              disabled={!selectedGame || starting || players.length < 2}
-              className="w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl px-4 py-4 transition-colors flex items-center justify-center gap-2"
-            >
-              <Play size={20} />
-              {starting ? 'Запускаем...' : players.length < 2 ? 'Нужно 2+ игроков' : 'Начать игру'}
+              {starting ? 'Запускаем...' : players.length < 2 ? 'Нужно 2+ игроков' : room.status === 'finished' ? 'Новая игра' : 'Начать игру'}
             </button>
           )}
 
@@ -455,7 +455,6 @@ export default function Room() {
           </div>
         </div>
       </div>
-
     </div>
   );
 }

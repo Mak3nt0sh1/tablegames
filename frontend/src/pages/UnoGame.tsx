@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useSound } from '../hooks/useSound';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useNotifications } from '../hooks/useNotifications';
-import { game as gameApi, auth } from '../api/client';
+import { game as gameApi, auth, rooms } from '../api/client';
 import Chat from '../components/Chat';
 import VoiceMini from '../components/VoiceMini';
 import { useVoice } from '../context/VoiceContext';
@@ -23,6 +23,7 @@ export default function UnoGame() {
   const me = auth.me();
 
   const [gameState, setGameState] = useState<GameState | null>(null);
+  const [roomHostId, setRoomHostId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [unoAlert, setUnoAlert] = useState('');
@@ -33,23 +34,28 @@ export default function UnoGame() {
   const [showChat, setShowChat] = useState(false);
   const [gameOver, setGameOver] = useState<null | { winner: number; players: GamePlayer[] }>(null);
 
+  const isHost = Number(roomHostId) === Number(me?.id);
+
   useEffect(() => {
     if (!roomId) return;
-    gameApi.getState(roomId)
-      .then((state) => {
+    Promise.all([
+        gameApi.getState(roomId),
+        rooms.get(roomId)
+    ]).then(([state, roomData]) => {
         setGameState(state);
+        setRoomHostId(roomData.host_id);
         setLoading(false);
-      })
-      .catch(() => {
+    }).catch(() => {
         setError('Не удалось загрузить состояние игры');
         setLoading(false);
-      });
+    });
   }, [roomId]);
 
   const { setVoiceUsers, handleOffer, handleAnswer, handleIce, initPeer, leave: leaveVoice } = useVoice();
 
   const { sendChat, sendVoiceJoin, sendVoiceLeave, sendVoiceOffer, sendVoiceAnswer, sendVoiceIce } = useWebSocket(roomId ?? null, {
     onRoomState: (payload: RoomStatePayload) => {
+      setRoomHostId(payload.host_id);
       if (payload.voice_users) {
         setVoiceUsers(payload.voice_users.map(u => ({ user_id: u.user_id, username: u.username })));
       }
@@ -99,23 +105,10 @@ export default function UnoGame() {
 
     onPlayerRemoved: (payload: any) => {
       if (Number(payload.user_id) === Number(me?.id)) {
-        setUnoAlert('Вы исключены из игры за AFK');
+        setUnoAlert('Вы исключены из игры');
         setTimeout(() => {
-          if (roomId) gameApi.reset(roomId).catch(() => {});
-          navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });
-        }, 3000);
-      } else {
-        setGameState((prev) => {
-          if (!prev) return prev;
-          const player = prev.players.find(p => Number(p.user_id) === Number(payload.user_id));
-          setUnoAlert(`${player?.username ?? 'Игрок'} исключён за AFK`);
-          setTimeout(() => setUnoAlert(''), 3000);
-          return {
-            ...prev,
-            players: prev.players.filter(p => Number(p.user_id) !== Number(payload.user_id)),
-            player_order: prev.player_order.filter(id => Number(id) !== Number(payload.user_id)),
-          };
-        });
+          navigate(`/${roomId}`, { replace: true });
+        }, 2000);
       }
     },
     onDrawTwoApplied: (payload: any) => {
@@ -153,7 +146,7 @@ export default function UnoGame() {
     },
     onRoomDeleted: () => { leaveVoice(); navigate('/'); },
     onGameForceEnded: () => {
-      navigate(`/${roomId}`, { replace: false, state: { from: 'game' } });
+      navigate(`/${roomId}`, { replace: true });
     },
     onChatHistory: (payload) => {
       setMessages(payload.map((msg) => ({ ...msg, id: ++msgIdRef.current })));
@@ -164,7 +157,6 @@ export default function UnoGame() {
     onVoiceUserJoined: (payload) => {
       const user = { user_id: payload.user_id, username: payload.username };
       setVoiceUsers((prev) => prev.find((u) => Number(u.user_id) === Number(user.user_id)) ? prev : [...prev, user]);
-      // ИСПРАВЛЕНИЕ: Не звоним сами себе
       if (Number(payload.user_id) !== Number(me?.id)) {
         initPeer(payload.user_id, sendVoiceOffer, sendVoiceIce).catch(console.error);
       }
@@ -245,6 +237,15 @@ export default function UnoGame() {
     }
   };
 
+  const handleForceEnd = async () => {
+    if (!roomId || !isHost) return;
+    if (confirm('Завершить игру для всех игроков?')) {
+        try {
+            await gameApi.forceEnd(roomId);
+        } catch {}
+    }
+  };
+
   if (loading) {
     return (
       <div className="w-screen h-screen flex items-center justify-center bg-gray-950">
@@ -266,7 +267,6 @@ export default function UnoGame() {
     );
   }
 
-  // ИСПРАВЛЕНИЕ: Чтобы карты не горели для всех при перезаходе, мы сверяем что игра еще идет
   const isMyTurn = gameState.phase === 'playing' && Number(gameState.current_turn) === Number(me?.id);
 
   const orderedPlayers = (gameState.player_order || []).map(id => 
@@ -315,20 +315,24 @@ export default function UnoGame() {
           boxShadow: '0 0 0 14px #c8a96e, 0 0 0 20px #7a5c2a, 0 24px 80px rgba(0,0,0,0.9)',
         }}
       />
-      <div
-        className="absolute top-1/2 left-1/2 w-[560px] h-[240px] rounded-[50%] z-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse, rgba(100,180,255,0.06) 0%, transparent 70%)',
-          transform: 'translate(-50%, -80%)',
-        }}
-      />
 
-      <button
-        onClick={() => navigate(`/${roomId}`, { replace: false, state: { from: 'game' } })}
-        className="absolute top-4 left-4 z-50 text-white/60 hover:text-white text-sm bg-black/30 hover:bg-black/50 px-3 py-2 rounded-lg transition-all"
-      >
-        ← В комнату
-      </button>
+      <div className="absolute top-4 left-4 z-50 flex gap-2">
+        <button
+            onClick={() => navigate(`/${roomId}`, { replace: false, state: { from: 'game' } })}
+            className="text-white/60 hover:text-white text-sm bg-black/30 hover:bg-black/50 px-3 py-2 rounded-lg transition-all"
+        >
+            ← В комнату
+        </button>
+
+        {isHost && (
+            <button
+                onClick={handleForceEnd}
+                className="text-red-400 hover:text-red-300 text-sm bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-3 py-2 rounded-lg transition-all font-bold"
+            >
+                ✕ Завершить игру
+            </button>
+        )}
+      </div>
 
       <div className="absolute top-4 right-4 z-50 text-white/60 text-sm bg-black/30 px-3 py-2 rounded-lg flex items-center gap-3">
         <span>{gameState.direction === 1 ? '↻ По часовой' : '↺ Против часовой'}</span>
@@ -491,7 +495,7 @@ export default function UnoGame() {
             </p>
             <div className="flex gap-3 justify-center">
               <button
-                onClick={() => navigate(`/${roomId}`, { replace: false, state: { from: 'game' } })}
+                onClick={() => navigate(`/${roomId}`, { replace: true })}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-3 rounded-xl"
               >
                 В комнату

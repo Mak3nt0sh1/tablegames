@@ -2,7 +2,6 @@ package game
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"tablegames/internal/game/uno"
@@ -16,13 +15,11 @@ var (
 	ErrUnsupportedGame    = errors.New("unsupported game type")
 )
 
-// Hub — то что нужно от ws.Hub
 type Hub interface {
 	BroadcastToRoom(roomUUID string, msgType string, payload any)
 	SendToUser(roomUUID string, userID uint64, msgType string, payload any)
 }
 
-// RoomService — то что нужно от room.Service
 type RoomService interface {
 	GetRoom(ctx context.Context, uuid string) (*models.Room, error)
 	GetMembers(ctx context.Context, roomID uint64) ([]models.RoomMember, error)
@@ -30,23 +27,20 @@ type RoomService interface {
 	SaveGameResults(ctx context.Context, roomID uint64, gameType string, winnerID uint64, scores map[uint64]int) error
 }
 
-// UserService — получение информации о пользователях
 type UserService interface {
 	GetUsernames(ctx context.Context, userIDs []uint64) (map[uint64]string, error)
 }
 
-// gameInfo хранит игру вместе с метаданными
 type gameInfo struct {
 	game     *uno.Game
 	roomID   uint64
 	gameType GameType
 }
 
-// Manager управляет всеми запущенными играми
 type Manager struct {
 	mu            sync.RWMutex
-	games         map[string]*gameInfo // roomUUID -> активная игра
-	finishedGames map[string]*uno.Game // roomUUID -> завершённая игра (для реконнекта)
+	games         map[string]*gameInfo
+	finishedGames map[string]*uno.Game
 	hub           Hub
 	roomSvc       RoomService
 	userSvc       UserService
@@ -62,22 +56,19 @@ func NewManager(hub Hub, roomSvc RoomService, userSvc UserService) *Manager {
 	}
 }
 
-// StartGame — хост запускает игру
 func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64, gameType GameType) error {
 	if !IsSupported(gameType) {
 		return ErrUnsupportedGame
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if _, exists := m.games[roomUUID]; exists {
+		m.mu.Unlock()
 		return ErrGameAlreadyRunning
 	}
-	// Чистим завершённую игру — позволяем запустить новую
 	delete(m.finishedGames, roomUUID)
+	m.mu.Unlock()
 
-	// Получаем комнату и проверяем что запрашивает хост
 	room, err := m.roomSvc.GetRoom(ctx, roomUUID)
 	if err != nil {
 		return err
@@ -86,7 +77,6 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 		return errors.New("only host can start the game")
 	}
 
-	// Получаем список игроков
 	members, err := m.roomSvc.GetMembers(ctx, room.ID)
 	if err != nil {
 		return err
@@ -95,7 +85,6 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 		return ErrNotEnoughPlayers
 	}
 
-	// Получаем имена
 	ids := make([]uint64, len(members))
 	for i, m := range members {
 		ids[i] = m.UserID
@@ -114,35 +103,29 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 		players[i].Username = usernames[mb.UserID]
 	}
 
-	// Сбрасываем статус на waiting → playing
-	_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "waiting")
-
-	// Запускаем игру
 	g := uno.NewGame(roomUUID, players)
-	info := &gameInfo{
+
+	m.mu.Lock()
+	m.games[roomUUID] = &gameInfo{
 		game:     g,
 		roomID:   room.ID,
 		gameType: gameType,
 	}
-	m.games[roomUUID] = info
-	game := g
+	m.mu.Unlock()
 
-	// Обновляем статус комнаты
 	_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "playing")
 
-	// Рассылаем game_started всем
 	m.hub.BroadcastToRoom(roomUUID, "game_started", map[string]any{
 		"game_type":     gameType,
-		"player_order":  game.State.PlayerOrder,
-		"players":       game.State.PublicPlayers(),
-		"top_card":      game.State.TopCard,
-		"current_color": game.State.CurrentColor,
-		"current_turn":  game.State.CurrentPlayerID(),
-		"direction":     game.State.Direction,
+		"player_order":  g.State.PlayerOrder,
+		"players":       g.State.PublicPlayers(),
+		"top_card":      g.State.TopCard,
+		"current_color": g.State.CurrentColor,
+		"current_turn":  g.State.CurrentPlayerID(),
+		"direction":     g.State.Direction,
 	})
 
-	// Каждому игроку отправляем только его руку
-	for _, p := range game.State.Players {
+	for _, p := range g.State.Players {
 		m.hub.SendToUser(roomUUID, p.UserID, "your_hand", map[string]any{
 			"user_id": p.UserID,
 			"hand":    p.Hand,
@@ -152,7 +135,6 @@ func (m *Manager) StartGame(ctx context.Context, roomUUID string, hostID uint64,
 	return nil
 }
 
-// PlayCard — игрок разыгрывает карту
 func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, cardID int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -168,7 +150,6 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 
 	s := game.State
 
-	// Если игра закончилась
 	if s.Phase == uno.PhaseFinished {
 		scores := game.Scores()
 		m.hub.BroadcastToRoom(roomUUID, "game_over", map[string]any{
@@ -178,7 +159,6 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 		})
 		info := m.games[roomUUID]
 		m.finishedGames[roomUUID] = game
-		// Сохраняем результаты игры
 		if s.Winner != nil && info != nil {
 			_ = m.roomSvc.SaveGameResults(ctx, info.roomID, string(info.gameType), *s.Winner, scores)
 		}
@@ -187,7 +167,6 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 		return nil
 	}
 
-	// Если висит штраф и у следующего игрока нет +2 для ответа — даём карты автоматически
 	if s.DrawPending > 0 {
 		nextID := s.CurrentPlayerID()
 		nextPlayer := game.PlayerByID(nextID)
@@ -201,11 +180,10 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 			}
 		}
 		if !hasDrawTwo && nextPlayer != nil {
-			// Берём карты напрямую без AdvanceTurn (он уже случился в applyCardEffect)
 			count := s.DrawPending
 			s.DrawPending = 0
 			drawn := game.DealCardsToPlayer(nextPlayer, count)
-			s.AdvanceTurn() // переходим ход после штрафа
+			s.AdvanceTurn()
 			m.hub.SendToUser(roomUUID, nextID, "your_drawn_cards", map[string]any{
 				"user_id": nextID,
 				"cards":   drawn,
@@ -220,7 +198,6 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 		}
 	}
 
-	// Рассылаем обновление состояния и запускаем таймер
 	m.broadcastGameState(roomUUID, game, "card_played", map[string]any{
 		"user_id":       userID,
 		"card":          s.TopCard,
@@ -229,7 +206,6 @@ func (m *Manager) PlayCard(ctx context.Context, roomUUID string, userID uint64, 
 	return nil
 }
 
-// DrawCard — игрок берёт карту
 func (m *Manager) DrawCard(ctx context.Context, roomUUID string, userID uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -243,13 +219,11 @@ func (m *Manager) DrawCard(ctx context.Context, roomUUID string, userID uint64) 
 	if err != nil {
 		return err
 	}
-	// Сообщаем всем что игрок взял карту(ы)
 	m.broadcastGameState(roomUUID, game, "card_drawn", map[string]any{
 		"user_id": userID,
 		"count":   len(drawn),
 	})
 
-	// Игроку отдельно отправляем что именно он взял
 	m.hub.SendToUser(roomUUID, userID, "your_drawn_cards", map[string]any{
 		"user_id": userID,
 		"cards":   drawn,
@@ -258,7 +232,6 @@ func (m *Manager) DrawCard(ctx context.Context, roomUUID string, userID uint64) 
 	return nil
 }
 
-// SayUno — игрок объявляет UNO
 func (m *Manager) SayUno(ctx context.Context, roomUUID string, userID uint64) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -279,7 +252,6 @@ func (m *Manager) SayUno(ctx context.Context, roomUUID string, userID uint64) er
 	return nil
 }
 
-// ChallengeUno — игрок вызывает штраф за непроизнесённое UNO
 func (m *Manager) ChallengeUno(ctx context.Context, roomUUID string, challengerID, targetID uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -301,7 +273,6 @@ func (m *Manager) ChallengeUno(ctx context.Context, roomUUID string, challengerI
 		"players":       game.State.PublicPlayers(),
 	})
 
-	// Пойманному игроку отправляем его новые карты
 	m.hub.BroadcastToRoom(roomUUID, "your_drawn_cards", map[string]any{
 		"user_id": targetID,
 		"cards":   drawn,
@@ -310,7 +281,6 @@ func (m *Manager) ChallengeUno(ctx context.Context, roomUUID string, challengerI
 	return nil
 }
 
-// GetGameState — получить публичное состояние игры (для реконнекта)
 func (m *Manager) GetGameState(roomUUID string, userID uint64) (map[string]any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -321,12 +291,17 @@ func (m *Manager) GetGameState(roomUUID string, userID uint64) (map[string]any, 
 	}
 
 	s := game.State
-	player := s.Players[0]
-	for _, p := range s.Players {
-		if p.UserID == userID {
-			player = p
+	var player *uno.PlayerState
+	for i := range s.Players {
+		if s.Players[i].UserID == userID {
+			player = &s.Players[i]
 			break
 		}
+	}
+
+	hand := []uno.Card{}
+	if player != nil {
+		hand = player.Hand
 	}
 
 	return map[string]any{
@@ -340,11 +315,10 @@ func (m *Manager) GetGameState(roomUUID string, userID uint64) (map[string]any, 
 		"players":        s.PublicPlayers(),
 		"player_order":   s.PlayerOrder,
 		"draw_pile_size": s.DrawPileSize(),
-		"your_hand":      player.Hand,
+		"your_hand":      hand,
 	}, nil
 }
 
-// broadcastGameState — рассылает обновление состояния игры всем в комнате
 func (m *Manager) broadcastGameState(roomUUID string, game *uno.Game, event string, extra map[string]any) {
 	s := game.State
 	payload := map[string]any{
@@ -360,47 +334,33 @@ func (m *Manager) broadcastGameState(roomUUID string, game *uno.Game, event stri
 	for k, v := range extra {
 		payload[k] = v
 	}
-	data, _ := json.Marshal(payload)
-	_ = data
 	m.hub.BroadcastToRoom(roomUUID, "game_state_update", payload)
 }
 
 func (m *Manager) getGame(roomUUID string) (*uno.Game, error) {
-	info, ok := m.games[roomUUID]
-	if !ok {
-		// Проверяем завершённые игры
-		if finished, ok := m.finishedGames[roomUUID]; ok {
-			return finished, nil
-		}
-		return nil, ErrNoGameRunning
+	if info, ok := m.games[roomUUID]; ok {
+		return info.game, nil
 	}
-	return info.game, nil
+	if finished, ok := m.finishedGames[roomUUID]; ok {
+		return finished, nil
+	}
+	return nil, ErrNoGameRunning
 }
 
-func (m *Manager) getGameInfo(roomUUID string) (*gameInfo, error) {
-	info, ok := m.games[roomUUID]
-	if !ok {
-		return nil, ErrNoGameRunning
-	}
-	return info, nil
-}
-
-// ResetGame — сбрасывает состояние игры для комнаты (вызывается при возврате в лобби)
 func (m *Manager) ResetGame(ctx context.Context, roomUUID string) {
 	m.mu.Lock()
 	delete(m.games, roomUUID)
 	delete(m.finishedGames, roomUUID)
 	m.mu.Unlock()
-	// Сбрасываем статус комнаты в БД на waiting
+
 	_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "waiting")
-	// Уведомляем всех в комнате что игра сброшена
+
 	m.hub.BroadcastToRoom(roomUUID, "game_reset", map[string]any{
 		"room_uuid": roomUUID,
 		"status":    "waiting",
 	})
 }
 
-// IsGameRunning — проверяет идёт ли игра прямо сейчас
 func (m *Manager) IsGameRunning(roomUUID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -408,7 +368,6 @@ func (m *Manager) IsGameRunning(roomUUID string) bool {
 	return ok
 }
 
-// GetStatus — возвращает текущий статус игры в комнате
 func (m *Manager) GetStatus(roomUUID string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -421,35 +380,35 @@ func (m *Manager) GetStatus(roomUUID string) string {
 	return "none"
 }
 
-// ForceEndGame — хост принудительно завершает игру
 func (m *Manager) ForceEndGame(ctx context.Context, roomUUID string, hostID uint64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	room, err := m.roomSvc.GetRoom(ctx, roomUUID)
+	if err != nil {
+		return err
+	}
+	if room.HostID != hostID {
+		return errors.New("only host can start/end the game")
+	}
 
-	// Уведомляем всех что игра принудительно завершена
+	m.mu.Lock()
 	m.hub.BroadcastToRoom(roomUUID, "game_force_ended", map[string]any{
 		"room_uuid": roomUUID,
 	})
 
-	// Чистим игру и сбрасываем статус
 	delete(m.games, roomUUID)
 	delete(m.finishedGames, roomUUID)
 	m.mu.Unlock()
+
 	_ = m.roomSvc.SetRoomStatus(ctx, roomUUID, "waiting")
-	m.mu.Lock() // восстанавливаем для defer
 	return nil
 }
 
-// GetActiveGame — возвращает UUID комнаты где у пользователя есть активная игра
 func (m *Manager) GetActiveGame(userID uint64) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for roomUUID, info := range m.games {
-		// Только если игра реально идёт (phase=playing)
 		if info.game.State.Phase != uno.PhasePlaying {
 			continue
 		}
-		// Проверяем по PlayerOrder — только активные игроки
 		for _, id := range info.game.State.PlayerOrder {
 			if id == userID {
 				return roomUUID, true
@@ -459,8 +418,6 @@ func (m *Manager) GetActiveGame(userID uint64) (string, bool) {
 	return "", false
 }
 
-// OnPlayerDisconnected — вызывается когда игрок отключился от WS
-// Если сейчас его ход — берём карту за него и передаём ход
 func (m *Manager) OnPlayerDisconnected(roomUUID string, userID uint64) {
 	m.mu.Lock()
 	info, ok := m.games[roomUUID]
@@ -468,12 +425,10 @@ func (m *Manager) OnPlayerDisconnected(roomUUID string, userID uint64) {
 		m.mu.Unlock()
 		return
 	}
-	// Если сейчас не ход этого игрока — ничего не делаем
 	if info.game.State.CurrentPlayerID() != userID {
 		m.mu.Unlock()
 		return
 	}
-	// Берём карту за отключившегося игрока и передаём ход
 	_, _ = info.game.DrawCard(userID)
 	m.mu.Unlock()
 
@@ -482,7 +437,6 @@ func (m *Manager) OnPlayerDisconnected(roomUUID string, userID uint64) {
 	})
 }
 
-// ForceRemovePlayer — принудительно убирает игрока из активной игры (при выходе из комнаты)
 func (m *Manager) ForceRemovePlayer(roomUUID string, userID uint64) {
 	m.mu.Lock()
 	info, ok := m.games[roomUUID]
@@ -492,7 +446,6 @@ func (m *Manager) ForceRemovePlayer(roomUUID string, userID uint64) {
 	}
 
 	s := info.game.State
-	// Убираем из очереди ходов
 	newOrder := make([]uint64, 0)
 	for _, id := range s.PlayerOrder {
 		if id != userID {
@@ -500,7 +453,6 @@ func (m *Manager) ForceRemovePlayer(roomUUID string, userID uint64) {
 		}
 	}
 
-	// Убираем из массива игроков (ИСПРАВЛЕНО)
 	newPlayers := make([]uno.PlayerState, 0)
 	for _, p := range s.Players {
 		if p.UserID != userID {
@@ -510,14 +462,13 @@ func (m *Manager) ForceRemovePlayer(roomUUID string, userID uint64) {
 	s.Players = newPlayers
 
 	if len(newOrder) == 0 {
-		// Все ушли — просто чистим
+		delete(m.games, roomUUID)
 		m.mu.Unlock()
 		return
 	}
 
 	s.PlayerOrder = newOrder
 
-	// Если остался 1 — победитель
 	if len(newOrder) == 1 {
 		winnerID := newOrder[0]
 		s.Winner = &winnerID
@@ -535,7 +486,6 @@ func (m *Manager) ForceRemovePlayer(roomUUID string, userID uint64) {
 		return
 	}
 
-	// Если ход был у ушедшего — передаём следующему
 	if s.CurrentPlayerID() == userID {
 		if len(newOrder) > 0 {
 			s.CurrentIndex = s.CurrentIndex % len(newOrder)
