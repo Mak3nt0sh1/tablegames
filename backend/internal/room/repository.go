@@ -3,6 +3,7 @@ package room
 import (
 	"context"
 	"tablegames/internal/models"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -32,8 +33,8 @@ func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) error {
 
 func (r *Repository) UpdateRoom(ctx context.Context, room *models.Room) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE rooms SET name = ?, max_players = ?, password_hash = ?, game_type = ? WHERE id = ?`,
-		room.Name, room.MaxPlayers, room.PasswordHash, room.GameType, room.ID,
+		`UPDATE rooms SET name = ?, max_players = ?, password_hash = ?, game_type = ?, expires_at = ? WHERE id = ?`,
+		room.Name, room.MaxPlayers, room.PasswordHash, room.GameType, room.ExpiresAt, room.ID,
 	)
 	return err
 }
@@ -142,12 +143,10 @@ func (r *Repository) FindByID(ctx context.Context, roomID uint64) (*models.Room,
 	return &room, err
 }
 
-func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ? WHERE id = ?`, status, roomID)
+func (r *Repository) UpdateStatus(ctx context.Context, roomID uint64, status string, expiresAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET status = ?, expires_at = ? WHERE id = ?`, status, expiresAt, roomID)
 	return err
 }
-
-// Добавленные методы для передачи хоста
 
 func (r *Repository) UpdateRoomHost(ctx context.Context, roomID, newHostID uint64) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET host_id = ? WHERE id = ?`, newHostID, roomID)
@@ -156,5 +155,11 @@ func (r *Repository) UpdateRoomHost(ctx context.Context, roomID, newHostID uint6
 
 func (r *Repository) UpdateMemberRole(ctx context.Context, roomID, userID uint64, role string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE room_members SET role = ? WHERE room_id = ? AND user_id = ?`, role, roomID, userID)
+	return err
+}
+
+// Продлевает время жизни комнаты при любой активности
+func (r *Repository) ExtendExpiration(ctx context.Context, roomID uint64, expiresAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE rooms SET expires_at = ? WHERE id = ?`, expiresAt, roomID)
 	return err
 }
